@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock Analysis Agent</title>
+    <link rel="stylesheet" href="chat.css?v=20260527-live-progress">
+</head>
+<body>
+<section id="login-screen" class="login-screen" aria-label="Login">
+    <form id="login-form" class="login-card" novalidate>
+        <div class="brand login-brand">
+            <span class="brand-mark" aria-hidden="true"></span>
+            <div class="brand-copy">
+                <h1>Stock Analysis Agent</h1>
+            </div>
+        </div>
+
+        <div class="login-field">
+            <label class="login-label" for="username-input">Username</label>
+            <input
+                id="username-input"
+                class="login-input"
+                type="text"
+                autocomplete="username"
+                spellcheck="false"
+                placeholder="Enter your username"
+                required
+            >
+            <p id="login-error" class="login-error" hidden>Enter a username.</p>
+        </div>
+
+        <button class="btn btn-primary" type="submit">Continue</button>
+    </form>
+</section>
+
+<main id="chat-app" class="chat-app" hidden>
+    <aside class="session-sidebar" aria-label="Saved sessions">
+        <div class="session-sidebar__header">
+            <div>
+                <p class="session-sidebar__eyebrow">Memory</p>
+                <h2>Sessions</h2>
+            </div>
+            <div class="session-sidebar__actions">
+                <button
+                    id="refresh-sessions-button"
+                    class="btn btn-secondary btn-icon"
+                    type="button"
+                    title="Refresh sessions"
+                    aria-label="Refresh sessions"
+                >
+                    <svg aria-hidden="true" viewBox="0 0 24 24">
+                        <path d="M20 12a8 8 0 1 1-2.34-5.66"></path>
+                        <path d="M20 4v6h-6"></path>
+                    </svg>
+                </button>
+                <button id="new-session-button" class="btn btn-secondary btn-compact" type="button">New</button>
+            </div>
+        </div>
+
+        <div id="sessions-list" class="session-list" role="list"></div>
+        <p id="sessions-empty" class="session-list-empty">No saved sessions yet.</p>
+
+        <div class="sidebar-account">
+            <div id="account-menu" class="account-menu" hidden>
+                <div class="session-identity" aria-label="Agent memory identity">
+                    <div class="identity-actions" aria-label="Caching controls">
+                        <button
+                            id="api-cache-toggle"
+                            class="identity-toggle"
+                            type="button"
+                            aria-pressed="false"
+                        >
+                            <span class="identity-toggle__text">API cache</span>
+                            <span class="identity-toggle__state">On</span>
+                            <span class="identity-toggle__switch" aria-hidden="true">
+                                <span class="identity-toggle__knob"></span>
+                            </span>
+                        </button>
+                        <button
+                            id="semantic-cache-toggle"
+                            class="identity-toggle"
+                            type="button"
+                            aria-pressed="false"
+                        >
+                            <span class="identity-toggle__text">Semantic cache</span>
+                            <span class="identity-toggle__state">On</span>
+                            <span class="identity-toggle__switch" aria-hidden="true">
+                                <span class="identity-toggle__knob"></span>
+                            </span>
+                        </button>
+                        <button
+                            id="rate-limit-toggle"
+                            class="identity-toggle"
+                            type="button"
+                            aria-pressed="false"
+                        >
+                            <span class="identity-toggle__text">Rate limit</span>
+                            <span class="identity-toggle__state">On</span>
+                            <span class="identity-toggle__switch" aria-hidden="true">
+                                <span class="identity-toggle__knob"></span>
+                            </span>
+                        </button>
+                    </div>
+                    <div class="identity-item">
+                        <label class="identity-label" for="retrieved-memories-limit-input">Memory count</label>
+                        <input
+                            id="retrieved-memories-limit-input"
+                            class="identity-input identity-input--numeric"
+                            type="number"
+                            min="1"
+                            max="20"
+                            step="1"
+                            inputmode="numeric"
+                            autocomplete="off"
+                            spellcheck="false"
+                            value="10"
+                        >
+                    </div>
+                </div>
+                <button id="logout-button" class="btn btn-secondary" type="button">Log out</button>
+            </div>
+            <button
+                id="account-menu-button"
+                class="account-menu-button"
+                type="button"
+                aria-haspopup="true"
+                aria-expanded="false"
+            >
+                <span class="account-label">Signed in as</span>
+                <span id="account-username" class="account-username"></span>
+            </button>
+        </div>
+    </aside>
+
+    <section class="chat-panel" aria-label="Stock analysis agent">
+        <header class="chat-header">
+            <div class="brand">
+                <span class="brand-mark" aria-hidden="true"></span>
+                <div class="brand-copy">
+                    <h1>Stock Analysis Agent</h1>
+                </div>
+            </div>
+
+            <div class="header-actions">
+                <div class="rate-limit-status" aria-label="Rate limit status">
+                    <span class="identity-label">Rate limit</span>
+                    <span id="rate-limit-status-value" class="identity-value">6 / 6</span>
+                </div>
+                <div class="provider-hit-card" aria-label="SEC API hits">
+                    <span class="identity-label">SEC API</span>
+                    <div class="provider-hit-card__body">
+                        <span id="sec-api-hits-value" class="identity-value">0</span>
+                        <button
+                            id="sec-api-reset-button"
+                            class="provider-hit-card__reset"
+                            type="button"
+                            data-provider="sec"
+                            title="Reset SEC API hits"
+                            aria-label="Reset SEC API hits"
+                        >
+                            <svg aria-hidden="true" viewBox="0 0 24 24">
+                                <path d="M3 12a9 9 0 1 0 3-6.7"></path>
+                                <path d="M3 4v6h6"></path>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="provider-hit-card" aria-label="Tavily API hits">
+                    <span class="identity-label">Tavily</span>
+                    <div class="provider-hit-card__body">
+                        <span id="tavily-api-hits-value" class="identity-value">0</span>
+                        <button
+                            id="tavily-api-reset-button"
+                            class="provider-hit-card__reset"
+                            type="button"
+                            data-provider="tavily"
+                            title="Reset Tavily API hits"
+                            aria-label="Reset Tavily API hits"
+                        >
+                            <svg aria-hidden="true" viewBox="0 0 24 24">
+                                <path d="M3 12a9 9 0 1 0 3-6.7"></path>
+                                <path d="M3 4v6h6"></path>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="provider-hit-card" aria-label="Twelve Data API hits">
+                    <span class="identity-label">Twelve Data</span>
+                    <div class="provider-hit-card__body">
+                        <span id="twelve-data-api-hits-value" class="identity-value">0</span>
+                        <button
+                            id="twelve-data-api-reset-button"
+                            class="provider-hit-card__reset"
+                            type="button"
+                            data-provider="twelve-data"
+                            title="Reset Twelve Data API hits"
+                            aria-label="Reset Twelve Data API hits"
+                        >
+                            <svg aria-hidden="true" viewBox="0 0 24 24">
+                                <path d="M3 12a9 9 0 1 0 3-6.7"></path>
+                                <path d="M3 4v6h6"></path>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="current-session" aria-label="Current session">
+                    <span class="identity-label">Session</span>
+                    <span id="session-id-value" class="identity-value">Loading...</span>
+                </div>
+                <button
+                    id="cache-button"
+                    class="btn btn-secondary btn-compact"
+                    type="button"
+                    aria-controls="cache-sidebar"
+                    aria-expanded="false"
+                >Cache</button>
+                <button
+                    id="memories-button"
+                    class="btn btn-secondary btn-compact"
+                    type="button"
+                    aria-controls="memory-sidebar"
+                    aria-expanded="false"
+                >Memories</button>
+            </div>
+        </header>
+
+        <section id="messages" class="messages" aria-live="polite" aria-label="Conversation"></section>
+
+        <form id="composer" class="composer" novalidate>
+            <div class="composer-shell">
+                <label class="sr-only" for="question-input">Question</label>
+                <textarea
+                    id="question-input"
+                    name="question"
+                    rows="1"
+                    placeholder="Ask a stock question naturally, then follow up without repeating the company..."
+                    required
+                ></textarea>
+
+                <div class="composer-footer">
+                    <div class="composer-meta">
+                        <span id="status-pill" class="status-pill">Ready</span>
+                        <span class="hint">Enter to send, Shift+Enter for a new line</span>
+                    </div>
+
+                    <button id="send-button" class="btn btn-primary" type="submit">Send</button>
+                </div>
+            </div>
+        </form>
+    </section>
+
+    <aside id="memory-sidebar" class="memory-sidebar" aria-label="Long term memories" hidden>
+        <div class="memory-sidebar__header">
+            <div>
+                <p class="session-sidebar__eyebrow">Long term</p>
+                <h2>Memories</h2>
+            </div>
+            <div class="memory-sidebar__actions">
+                <button id="flush-memories-button" class="btn btn-secondary btn-compact" type="button">Flush all</button>
+                <button id="close-memories-button" class="session-list__delete" type="button" aria-label="Close memories">x</button>
+            </div>
+        </div>
+        <form id="memory-create-form" class="memory-form" novalidate>
+            <div class="memory-form__field">
+                <label class="memory-form__label" for="memory-text-input">Memory</label>
+                <textarea
+                    id="memory-text-input"
+                    class="memory-form__input memory-form__textarea"
+                    rows="4"
+                    placeholder="Alice owns 25 shares of NVDA."
+                    required
+                ></textarea>
+            </div>
+            <div class="memory-form__row">
+                <div class="memory-form__field">
+                    <label class="memory-form__label" for="memory-type-input">Type</label>
+                    <select id="memory-type-input" class="memory-form__input">
+                        <option value="semantic">Semantic</option>
+                        <option value="episodic">Episodic</option>
+                        <option value="message">Message</option>
+                    </select>
+                </div>
+                <div class="memory-form__field">
+                    <label class="memory-form__label" for="memory-topics-input">Topics</label>
+                    <input
+                        id="memory-topics-input"
+                        class="memory-form__input"
+                        type="text"
+                        autocomplete="off"
+                        spellcheck="false"
+                        placeholder="stocks, nvda"
+                    >
+                </div>
+            </div>
+            <p id="memory-create-error" class="memory-form__error" hidden></p>
+            <div class="memory-form__actions">
+                <button id="create-memory-button" class="btn btn-primary btn-compact" type="submit">Create memory</button>
+            </div>
+        </form>
+        <div id="memories-list" class="memory-list session-list" role="list"></div>
+        <p id="memories-empty" class="session-list-empty">No long term memories yet.</p>
+    </aside>
+
+    <aside id="cache-sidebar" class="memory-sidebar cache-sidebar" aria-label="Cached external data" hidden>
+        <div class="memory-sidebar__header">
+            <div>
+                <p class="session-sidebar__eyebrow">External data</p>
+                <h2>Cache</h2>
+            </div>
+            <div class="memory-sidebar__actions">
+                <button
+                    id="refresh-cache-button"
+                    class="btn btn-secondary btn-icon"
+                    type="button"
+                    title="Refresh cache"
+                    aria-label="Refresh cache"
+                >
+                    <svg aria-hidden="true" viewBox="0 0 24 24">
+                        <path d="M20 12a8 8 0 1 1-2.34-5.66"></path>
+                        <path d="M20 4v6h-6"></path>
+                    </svg>
+                </button>
+                <button id="close-cache-button" class="session-list__delete" type="button" aria-label="Close cache">x</button>
+            </div>
+        </div>
+        <div id="cache-list" class="memory-list cache-list session-list" role="list"></div>
+        <p id="cache-empty" class="session-list-empty">No cached external data yet.</p>
+    </aside>
+</main>
+
+<template id="empty-state-template">
+    <div class="empty-state">
+        <div class="empty-state__card">
+            <p class="empty-state__eyebrow">Browser Test Harness</p>
+            <h2>Ask the stock agent anything</h2>
+            <p class="empty-state__copy">
+                Start naturally, then follow up without repeating the company every turn.
+            </p>
+            <div class="suggestions" role="list" aria-label="Suggested prompts">
+                <button class="suggestion" type="button" data-question="What's the current price of Apple?">
+                    <span class="suggestion__ticker">Apple</span>
+                    <span class="suggestion__question">What's the current price of Apple?</span>
+                </button>
+                <button class="suggestion" type="button" data-question="Give me a full view on Nvidia with fundamentals, news, and technical analysis.">
+                    <span class="suggestion__ticker">Nvidia</span>
+                    <span class="suggestion__question">Give me a full view on Nvidia with fundamentals, news, and technical analysis.</span>
+                </button>
+                <button class="suggestion" type="button" data-question="What recent news should I know about Microsoft?">
+                    <span class="suggestion__ticker">Microsoft</span>
+                    <span class="suggestion__question">What recent news should I know about Microsoft?</span>
+                </button>
+            </div>
+        </div>
+    </div>
+</template>
+
+<script src="chat.js?v=20260527ratelimitingtoggle" defer></script>
+</body>
+</html>

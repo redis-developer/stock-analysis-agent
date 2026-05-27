@@ -1,0 +1,98 @@
+spring:
+  application:
+    name: stock-analysis-agent
+  web:
+    resources:
+      cache:
+        cachecontrol:
+          no-store: true
+          no-cache: true
+          must-revalidate: true
+  cache:
+    type: ${SPRING_CACHE_TYPE:redis}
+  data:
+    redis:
+      host: ${STOCK_ANALYSIS_AGENT_REDIS_HOST:localhost}
+      port: ${STOCK_ANALYSIS_AGENT_REDIS_PORT:6379}
+      username: ${STOCK_ANALYSIS_AGENT_REDIS_USERNAME:}
+      password: ${STOCK_ANALYSIS_AGENT_REDIS_PASSWORD:}
+  session:
+    redis:
+      namespace: stock-analysis:session
+    timeout: 30m
+  ai:
+    openai:
+      api-key: ${OPENAI_API_KEY:${SPRING_AI_OPENAI_API_KEY:}}
+      chat:
+        options:
+          model: gpt-4o
+      embedding:
+        options:
+          model: text-embedding-3-small
+    model:
+      chat: openai
+      embedding: openai
+      image: none
+      moderation: none
+      audio:
+        speech: none
+        transcription: none
+        
+stock-analysis:
+  market-data:
+    provider: twelve-data
+    twelve-data:
+      base-url: https://api.twelvedata.com
+      api-key: ${TWELVE_DATA_API_KEY:}
+  fundamentals:
+    provider: sec
+  news:
+    provider: sec
+    tavily:
+      base-url: https://api.tavily.com
+      api-key: ${TAVILY_API_KEY:}
+      max-results: 5
+  technical-analysis:
+    provider: twelve-data
+    interval: 1day
+    output-size: 60
+    sma-period: 20
+    ema-period: 20
+    rsi-period: 14
+  sec:
+    data-base-url: https://data.sec.gov
+    ticker-file-url: https://www.sec.gov/files/company_tickers.json
+    user-agent: ${SEC_USER_AGENT:stock-analysis-agent-workshop workshop@example.com}
+  semantic-cache:
+    ttl-seconds: 300
+    lang-cache:
+      url: ${LANGCACHE_URL:https://gcp-europe-west1.langcache.redis.io}
+      cache-id: ${LANGCACHE_CACHE_ID:b3aba967ba704d25b6cc76b3e7870c1c}
+      api-key: ${LANGCACHE_API_KEY:lc1_BeZGTCUCtHIS_0sozbGeV_ihPdpNUAlI6xiJyCsdEvq8VA1U6f7iz5d93joBAgqQhLQ0yv16Q7YLlINkpqo6i1KKK8Y51LKTsUGhe81S_DWYofBYKg1U34fBVq0sNrOojFEKhDjpUw2EU2Fr5g==}
+      similarity-threshold: ${LANGCACHE_SIMILARITY_THRESHOLD:0.9}
+      exact-search: ${LANGCACHE_EXACT_SEARCH:true}
+      semantic-search: ${LANGCACHE_SEMANTIC_SEARCH:true}
+      include-kind-attribute: ${LANGCACHE_INCLUDE_KIND_ATTRIBUTE:false}
+  semantic-guardrail:
+    enabled: ${SEMANTIC_GUARDRAIL_ENABLED:true}
+    distance-threshold: 0.5
+    name: stock-analysis-semantic-guardrail
+    embedding-model-name: ${spring.ai.openai.embedding.options.model:text-embedding-3-small}
+    embedding-dimensions: 1536
+
+agent-memory:
+  namespace: ${AGENT_MEMORY_NAMESPACE:stock-analysis}
+  url: ${STOCK_ANALYSIS_AGENT_AGENT_MEMORY_ENDPOINT:https://gcp-us-east4.memory.redis.io}
+  store-id: ${STOCK_ANALYSIS_AGENT_AGENT_MEMORY_STORE_ID:}
+  api-key: ${STOCK_ANALYSIS_AGENT_AGENT_MEMORY_API_KEY:}
+app:
+  chat:
+    session-management-enabled: ${CHAT_SESSION_MANAGEMENT_ENABLED:true}
+  rate-limiting:
+    enabled: ${RATE_LIMITING_ENABLED:true}
+    requests-per-minute: ${RATE_LIMITING_REQUESTS_PER_MINUTE:6}
+    refill-period: ${RATE_LIMITING_REFILL_PERIOD:1m}
+    redis-key-prefix: ${RATE_LIMITING_REDIS_KEY_PREFIX:stock-analysis:rate-limit:user}
+    protected-paths:
+      - /api/chat
+      - /api/chat/stream
