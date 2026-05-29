@@ -1,0 +1,23 @@
+project_id = "your-gcp-project-id"
+region     = "us-central1"
+
+redis_host     = "your-redis-host"
+redis_port     = 6379
+redis_username = "default"
+
+langcache_url      = "https://gcp-europe-west1.langcache.redis.io"
+langcache_cache_id = "your-langcache-cache-id"
+
+agent_memory_endpoint = "https://gcp-us-east4.memory.redis.io"
+agent_memory_store_id = "your-agent-memory-store-id"
+
+sec_user_agent = "stock-analysis-agent you@example.com"
+
+secret_values = {
+  openai_api_key       = "your-openai-api-key"
+  redis_password       = "your-redis-password"
+  langcache_api_key    = "your-langcache-api-key"
+  agent_memory_api_key = "your-agent-memory-api-key"
+  twelve_data_api_key  = "your-twelve-data-api-key"
+  tavily_api_key       = "your-tavily-api-key"
+}

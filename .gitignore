@@ -26,6 +26,18 @@ out/
 !**/src/main/**/out/
 !**/src/test/**/out/
 
+### Local environment ###
+.env
+.env.*
+
+### Terraform ###
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+crash.log
+
 ### NetBeans ###
 /nbproject/private/
 /nbbuild/

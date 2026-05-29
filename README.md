@@ -58,7 +58,7 @@ export STOCK_ANALYSIS_AGENT_REDIS_HOST=localhost
 export STOCK_ANALYSIS_AGENT_REDIS_PORT=6379
 export LANGCACHE_URL=your_langcache_url
 export LANGCACHE_CACHE_ID=your_langcache_cache_id
-export LANGCACHE_API_KEY=your_langcache_api_key
+export STOCK_ANALYSIS_AGENT_LANGCACHE_API_KEY=your_langcache_api_key
 export STOCK_ANALYSIS_AGENT_AGENT_MEMORY_ENDPOINT=your_agent_memory_endpoint
 export STOCK_ANALYSIS_AGENT_AGENT_MEMORY_STORE_ID=your_agent_memory_store_id
 export STOCK_ANALYSIS_AGENT_AGENT_MEMORY_API_KEY=your_agent_memory_api_key
@@ -93,6 +93,35 @@ http://localhost:8080
 ```bash
 ./gradlew test
 ```
+
+## Docker
+
+Build the container:
+
+```bash
+docker build -t stock-analysis-agent .
+```
+
+Run it with the same environment variables listed above:
+
+```bash
+docker run --rm -p 8080:8080 --env-file .env stock-analysis-agent
+```
+
+## Cloud Run
+
+Terraform for Cloud Run is in `infra/terraform/cloudrun`.
+
+It creates Artifact Registry, Cloud Run, Secret Manager secrets, a runtime service account, and IAM. It applies these labels to labelable resources:
+
+```text
+owner=raphael_delio
+skip_deletion=yes
+```
+
+Use a Redis 8 compatible endpoint for the Redis settings.
+
+Use Cloud Build or build a `linux/amd64` image before deploying to Cloud Run.
 
 ## Docs
 

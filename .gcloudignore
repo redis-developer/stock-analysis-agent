@@ -1,0 +1,15 @@
+.git
+.gradle
+build
+out
+.idea
+.vscode
+*.iml
+*.iws
+*.ipr
+.DS_Store
+infra/terraform/cloudrun/.terraform
+infra/terraform/cloudrun/*.tfstate
+infra/terraform/cloudrun/*.tfstate.*
+infra/terraform/cloudrun/*.tfvars
+infra/terraform/cloudrun/*.tfvars.json

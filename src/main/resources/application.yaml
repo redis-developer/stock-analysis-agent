@@ -8,6 +8,9 @@ spring:
           no-store: true
           no-cache: true
           must-revalidate: true
+  mvc:
+    async:
+      request-timeout: ${SPRING_MVC_ASYNC_REQUEST_TIMEOUT:10m}
   cache:
     type: ${SPRING_CACHE_TYPE:redis}
   data:
@@ -66,9 +69,9 @@ stock-analysis:
   semantic-cache:
     ttl-seconds: 300
     lang-cache:
-      url: ${LANGCACHE_URL:https://gcp-europe-west1.langcache.redis.io}
-      cache-id: ${LANGCACHE_CACHE_ID:b3aba967ba704d25b6cc76b3e7870c1c}
-      api-key: ${LANGCACHE_API_KEY:lc1_BeZGTCUCtHIS_0sozbGeV_ihPdpNUAlI6xiJyCsdEvq8VA1U6f7iz5d93joBAgqQhLQ0yv16Q7YLlINkpqo6i1KKK8Y51LKTsUGhe81S_DWYofBYKg1U34fBVq0sNrOojFEKhDjpUw2EU2Fr5g==}
+      url: ${STOCK_ANALYSIS_AGENT_LANGCACHE_ENDPOINT}
+      cache-id: ${STOCK_ANALYSIS_AGENT_LANGCACHE_CACHE_ID}
+      api-key: ${STOCK_ANALYSIS_AGENT_LANGCACHE_API_KEY}}
       similarity-threshold: ${LANGCACHE_SIMILARITY_THRESHOLD:0.9}
       exact-search: ${LANGCACHE_EXACT_SEARCH:true}
       semantic-search: ${LANGCACHE_SEMANTIC_SEARCH:true}
@@ -96,3 +99,6 @@ app:
     protected-paths:
       - /api/chat
       - /api/chat/stream
+
+server:
+  port: ${PORT:8080}
