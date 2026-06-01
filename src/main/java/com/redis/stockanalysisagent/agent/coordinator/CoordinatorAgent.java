@@ -109,7 +109,8 @@ public class CoordinatorAgent {
                     "Calling coordinator",
                     ChatProgressPublisher.KIND_AGENT,
                     elapsedDurationMs(startedAt),
-                    coordinatorProgressSummary(cacheHit, guardrailHit, agentExecutions)
+                    coordinatorProgressSummary(cacheHit, guardrailHit, agentExecutions),
+                    result.tokenUsage()
             );
             return result;
         } catch (RuntimeException ex) {

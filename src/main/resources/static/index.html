@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Stock Analysis Agent</title>
-    <link rel="stylesheet" href="chat.css?v=20260527-live-progress">
+    <link rel="stylesheet" href="chat.css?v=20260601-memory-tabs">
 </head>
 <body>
 <section id="login-screen" class="login-screen" aria-label="Login">
@@ -35,13 +35,19 @@
 </section>
 
 <main id="chat-app" class="chat-app" hidden>
-    <aside class="session-sidebar" aria-label="Saved sessions">
+    <aside id="session-sidebar" class="session-sidebar" aria-label="Saved sessions">
         <div class="session-sidebar__header">
             <div>
                 <p class="session-sidebar__eyebrow">Memory</p>
                 <h2>Sessions</h2>
             </div>
             <div class="session-sidebar__actions">
+                <button
+                    id="mobile-close-sessions-button"
+                    class="session-list__delete mobile-close-sessions-button"
+                    type="button"
+                    aria-label="Close sessions"
+                >x</button>
                 <button
                     id="refresh-sessions-button"
                     class="btn btn-secondary btn-icon"
@@ -135,12 +141,50 @@
 
     <section class="chat-panel" aria-label="Stock analysis agent">
         <header class="chat-header">
+            <button
+                id="mobile-sessions-button"
+                class="mobile-nav-button"
+                type="button"
+                aria-controls="session-sidebar"
+                aria-expanded="false"
+                aria-label="Open sessions"
+            >
+                <svg aria-hidden="true" viewBox="0 0 24 24">
+                    <path d="M4 7h16"></path>
+                    <path d="M4 12h16"></path>
+                    <path d="M4 17h16"></path>
+                </svg>
+            </button>
             <div class="brand">
                 <span class="brand-mark" aria-hidden="true"></span>
                 <div class="brand-copy">
                     <h1>Stock Analysis Agent</h1>
                 </div>
             </div>
+            <button
+                id="mobile-new-session-button"
+                class="mobile-nav-button"
+                type="button"
+                aria-label="New chat"
+            >
+                <svg aria-hidden="true" viewBox="0 0 24 24">
+                    <path d="M12 20h9"></path>
+                    <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path>
+                </svg>
+            </button>
+            <button
+                id="mobile-tools-button"
+                class="mobile-nav-button"
+                type="button"
+                aria-expanded="false"
+                aria-label="Open tools"
+            >
+                <svg aria-hidden="true" viewBox="0 0 24 24">
+                    <path d="M5 12h.01"></path>
+                    <path d="M12 12h.01"></path>
+                    <path d="M19 12h.01"></path>
+                </svg>
+            </button>
 
             <div class="header-actions">
                 <div class="rate-limit-status" aria-label="Rate limit status">
@@ -257,11 +301,36 @@
                 <h2>Memories</h2>
             </div>
             <div class="memory-sidebar__actions">
+                <button id="add-memory-button" class="btn btn-secondary btn-compact" type="button" aria-controls="memory-create-form" aria-expanded="false">Add memory</button>
                 <button id="flush-memories-button" class="btn btn-secondary btn-compact" type="button">Flush all</button>
                 <button id="close-memories-button" class="session-list__delete" type="button" aria-label="Close memories">x</button>
             </div>
         </div>
+        <div class="memory-tabs" role="tablist" aria-label="Memory views">
+            <button
+                id="memory-tab-all"
+                class="memory-tabs__button is-active"
+                type="button"
+                role="tab"
+                aria-selected="true"
+                aria-controls="memories-list"
+                data-memory-tab="all"
+            >All</button>
+            <button
+                id="memory-tab-current-chat"
+                class="memory-tabs__button"
+                type="button"
+                role="tab"
+                aria-selected="false"
+                aria-controls="memories-list"
+                data-memory-tab="current-chat"
+            >Extracted from this chat</button>
+        </div>
         <form id="memory-create-form" class="memory-form" novalidate>
+            <div class="memory-form__header">
+                <h3>Add memory</h3>
+                <button id="close-memory-form-button" class="session-list__delete memory-form__close" type="button" aria-label="Close add memory">x</button>
+            </div>
             <div class="memory-form__field">
                 <label class="memory-form__label" for="memory-text-input">Memory</label>
                 <textarea
@@ -332,11 +401,7 @@
 <template id="empty-state-template">
     <div class="empty-state">
         <div class="empty-state__card">
-            <p class="empty-state__eyebrow">Browser Test Harness</p>
             <h2>Ask the stock agent anything</h2>
-            <p class="empty-state__copy">
-                Start naturally, then follow up without repeating the company every turn.
-            </p>
             <div class="suggestions" role="list" aria-label="Suggested prompts">
                 <button class="suggestion" type="button" data-question="What's the current price of Apple?">
                     <span class="suggestion__ticker">Apple</span>
@@ -355,6 +420,6 @@
     </div>
 </template>
 
-<script src="chat.js?v=20260527ratelimitingtoggle" defer></script>
+<script src="chat.js?v=20260601-memory-tabs" defer></script>
 </body>
 </html>

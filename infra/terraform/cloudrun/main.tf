@@ -35,8 +35,8 @@ locals {
     STOCK_ANALYSIS_AGENT_REDIS_HOST            = var.redis_host
     STOCK_ANALYSIS_AGENT_REDIS_PORT            = tostring(var.redis_port)
     STOCK_ANALYSIS_AGENT_REDIS_USERNAME        = var.redis_username
-    LANGCACHE_URL                              = var.langcache_url
-    LANGCACHE_CACHE_ID                         = var.langcache_cache_id
+    STOCK_ANALYSIS_AGENT_LANGCACHE_ENDPOINT    = var.langcache_url
+    STOCK_ANALYSIS_AGENT_LANGCACHE_CACHE_ID    = var.langcache_cache_id
     STOCK_ANALYSIS_AGENT_AGENT_MEMORY_ENDPOINT = var.agent_memory_endpoint
     STOCK_ANALYSIS_AGENT_AGENT_MEMORY_STORE_ID = var.agent_memory_store_id
     SEC_USER_AGENT                             = var.sec_user_agent
@@ -48,29 +48,31 @@ locals {
     var.environment_variables
   )
 
+  secret_prefix = "STOCK_ANALYSIS_AGENT_"
+
   secret_environment = {
     openai_api_key = {
-      env_name  = "OPENAI_API_KEY"
+      env_name  = "${local.secret_prefix}OPENAI_API_KEY"
       secret_id = "${var.service_name}-openai-api-key"
     }
     redis_password = {
-      env_name  = "STOCK_ANALYSIS_AGENT_REDIS_PASSWORD"
+      env_name  = "${local.secret_prefix}REDIS_PASSWORD"
       secret_id = "${var.service_name}-redis-password"
     }
     langcache_api_key = {
-      env_name  = "STOCK_ANALYSIS_AGENT_LANGCACHE_API_KEY"
+      env_name  = "${local.secret_prefix}LANGCACHE_API_KEY"
       secret_id = "${var.service_name}-langcache-api-key"
     }
     agent_memory_api_key = {
-      env_name  = "STOCK_ANALYSIS_AGENT_AGENT_MEMORY_API_KEY"
+      env_name  = "${local.secret_prefix}AGENT_MEMORY_API_KEY"
       secret_id = "${var.service_name}-agent-memory-api-key"
     }
     twelve_data_api_key = {
-      env_name  = "TWELVE_DATA_API_KEY"
+      env_name  = "${local.secret_prefix}TWELVE_DATA_API_KEY"
       secret_id = "${var.service_name}-twelve-data-api-key"
     }
     tavily_api_key = {
-      env_name  = "TAVILY_API_KEY"
+      env_name  = "${local.secret_prefix}TAVILY_API_KEY"
       secret_id = "${var.service_name}-tavily-api-key"
     }
   }
@@ -114,6 +116,10 @@ resource "google_secret_manager_secret" "app" {
   secret_id = each.value.secret_id
   labels    = local.labels
 
+  lifecycle {
+    prevent_destroy = true
+  }
+
   replication {
     auto {}
   }
@@ -121,13 +127,6 @@ resource "google_secret_manager_secret" "app" {
   depends_on = [
     google_project_service.required
   ]
-}
-
-resource "google_secret_manager_secret_version" "app" {
-  for_each = local.secret_environment
-
-  secret      = google_secret_manager_secret.app[each.key].id
-  secret_data = var.secret_values[each.key]
 }
 
 resource "google_secret_manager_secret_iam_member" "cloud_run_secret_accessor" {
@@ -219,7 +218,7 @@ resource "google_cloud_run_v2_service" "app" {
 
   depends_on = [
     google_project_service.required,
-    google_secret_manager_secret_version.app,
+    google_secret_manager_secret.app,
     google_secret_manager_secret_iam_member.cloud_run_secret_accessor
   ]
 }

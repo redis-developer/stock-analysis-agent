@@ -1,5 +1,6 @@
 package com.redis.stockanalysisagent.chat;
 
+import com.redis.stockanalysisagent.agent.TokenUsageSummary;
 import com.redis.stockanalysisagent.session.ChatSessionAccess;
 import com.redis.stockanalysisagent.session.controller.ChatSessionController;
 import com.redis.stockanalysisagent.session.ChatSessionService;
@@ -8,6 +9,7 @@ import com.redis.stockanalysisagent.session.controller.vo.LoginRequest;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -137,6 +139,14 @@ class ChatControllerTests {
                     ChatProgressPublisher.KIND_SYSTEM,
                     "Testing progress."
             );
+            realProgressPublisher.completed(
+                    "TEST_STEP",
+                    "Test step",
+                    ChatProgressPublisher.KIND_SYSTEM,
+                    25,
+                    "Tested progress.",
+                    new TokenUsageSummary(10, 5, 15)
+            );
             return new ChatService.ChatTurn(
                     "alice:session-1",
                     "response",
@@ -150,7 +160,8 @@ class ChatControllerTests {
 
         StreamingResponseBody body = streamingController.chatStream(
                 new ChatRequest("session-1", "hello", null, null, null, null),
-                request
+                request,
+                new MockHttpServletResponse()
         ).getBody();
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
 
@@ -160,6 +171,7 @@ class ChatControllerTests {
         String stream = outputStream.toString();
         assertThat(stream).contains("\"type\":\"progress\"");
         assertThat(stream).contains("\"id\":\"TEST_STEP\"");
+        assertThat(stream).contains("\"totalTokens\":15");
         assertThat(stream).contains("\"type\":\"final\"");
         assertThat(stream).contains("\"response\":\"response\"");
     }

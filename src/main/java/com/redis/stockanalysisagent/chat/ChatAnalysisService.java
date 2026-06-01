@@ -9,6 +9,7 @@ import com.redis.stockanalysisagent.memory.AmsChatMemoryRepository;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 
 @Service
@@ -86,7 +87,9 @@ class ChatAnalysisService {
                 List.copyOf(executionSteps),
                 coordinationResult.cacheHit(),
                 coordinationResult.guardrailHit(),
-                TokenUsageSummary.sum(executionSteps.stream().map(ChatExecutionStep::tokenUsage).toList())
+                TokenUsageSummary.sum(executionSteps.stream().map(ChatExecutionStep::tokenUsage).toList()),
+                resolveTickers(coordinatorResponse, agentExecutions),
+                triggeredAgents(agentExecutions)
         );
     }
 
@@ -360,12 +363,66 @@ class ChatAnalysisService {
                 .sum();
     }
 
+    private List<String> resolveTickers(CoordinatorResponse coordinatorResponse, List<AgentExecution> agentExecutions) {
+        LinkedHashSet<String> tickers = new LinkedHashSet<>();
+        if (coordinatorResponse != null) {
+            addTickers(tickers, coordinatorResponse.getResolvedTickers());
+            addTicker(tickers, coordinatorResponse.getResolvedTicker());
+        }
+        if (agentExecutions != null) {
+            agentExecutions.stream()
+                    .filter(execution -> execution != null)
+                    .forEach(execution -> addTicker(tickers, execution.ticker()));
+        }
+        return List.copyOf(tickers);
+    }
+
+    private List<String> triggeredAgents(List<AgentExecution> agentExecutions) {
+        if (agentExecutions == null || agentExecutions.isEmpty()) {
+            return List.of();
+        }
+
+        LinkedHashSet<String> agents = new LinkedHashSet<>();
+        agentExecutions.stream()
+                .filter(execution -> execution != null)
+                .filter(execution -> execution.agentType() != null)
+                .map(execution -> execution.agentType().name())
+                .forEach(agents::add);
+        return List.copyOf(agents);
+    }
+
+    private void addTickers(LinkedHashSet<String> target, List<String> tickers) {
+        if (tickers == null) {
+            return;
+        }
+        tickers.forEach(ticker -> addTicker(target, ticker));
+    }
+
+    private void addTicker(LinkedHashSet<String> target, String ticker) {
+        if (ticker == null || ticker.isBlank()) {
+            return;
+        }
+
+        for (String part : ticker.split("[,\\s]+")) {
+            String normalized = part.trim().toUpperCase();
+            if (!normalized.isBlank()) {
+                target.add(normalized);
+            }
+        }
+    }
+
     record AnalysisTurn(
             String response,
             List<ChatExecutionStep> executionSteps,
             boolean fromSemanticCache,
             boolean fromSemanticGuardrail,
-            TokenUsageSummary tokenUsage
+            TokenUsageSummary tokenUsage,
+            List<String> tickers,
+            List<String> triggeredAgents
     ) {
+        AnalysisTurn {
+            tickers = tickers == null ? List.of() : List.copyOf(tickers);
+            triggeredAgents = triggeredAgents == null ? List.of() : List.copyOf(triggeredAgents);
+        }
     }
 }

@@ -111,6 +111,7 @@ public class CoordinatorAgentTools {
                     ChatProgressPublisher.KIND_AGENT,
                     elapsedDurationMs(startedAt),
                     result.getMessage(),
+                    result.getTokenUsage(),
                     accesses
             );
             return AgentToolResult.completed(result.getMessage(), result.getFinalResponse());
@@ -159,6 +160,7 @@ public class CoordinatorAgentTools {
                     ChatProgressPublisher.KIND_AGENT,
                     elapsedDurationMs(startedAt),
                     result.getMessage(),
+                    result.getTokenUsage(),
                     accesses
             );
             return AgentToolResult.completed(result.getMessage(), result.getFinalResponse());
@@ -203,6 +205,7 @@ public class CoordinatorAgentTools {
                     ChatProgressPublisher.KIND_AGENT,
                     elapsedDurationMs(startedAt),
                     result.getMessage(),
+                    result.getTokenUsage(),
                     accesses
             );
             return AgentToolResult.completed(result.getMessage(), result.getFinalResponse());
@@ -247,6 +250,7 @@ public class CoordinatorAgentTools {
                     ChatProgressPublisher.KIND_AGENT,
                     elapsedDurationMs(startedAt),
                     result.getMessage(),
+                    result.getTokenUsage(),
                     accesses
             );
             return AgentToolResult.completed(result.getMessage(), result.getFinalResponse());
@@ -309,7 +313,8 @@ public class CoordinatorAgentTools {
                     agentProgressLabel(AgentType.SYNTHESIS, tickerLabel),
                     ChatProgressPublisher.KIND_AGENT,
                     elapsedDurationMs(startedAt),
-                    result.getMessage()
+                    result.getMessage(),
+                    result.getTokenUsage()
             );
             return AgentToolResult.completed(result.getMessage(), result.getFinalResponse());
         } catch (RuntimeException ex) {

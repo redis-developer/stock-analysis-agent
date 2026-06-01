@@ -46,7 +46,7 @@ public class TwelveDataMarketDataProvider implements MarketDataProvider {
         if (properties.getApiKey() == null || properties.getApiKey().isBlank()) {
             throw new IllegalStateException("""
                     Twelve Data market data is enabled, but no API key is configured.
-                    Set TWELVE_DATA_API_KEY or stock-analysis.market-data.twelve-data.api-key.
+                    Set STOCK_ANALYSIS_AGENT_TWELVE_DATA_API_KEY or stock-analysis.market-data.twelve-data.api-key.
                     """.stripIndent().trim());
         }
 

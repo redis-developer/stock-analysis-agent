@@ -1,5 +1,6 @@
 package com.redis.stockanalysisagent.memory.service;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -160,7 +161,7 @@ public final class AgentMemoryApiModels {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record ListSessionsResponse(
-            @JsonProperty("items") List<String> items,
+            @JsonProperty("sessions") @JsonAlias("items") List<String> sessions,
             @JsonProperty("total") int total,
             @JsonProperty("nextPageToken") String nextPageToken
     ) {

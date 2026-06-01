@@ -6,6 +6,7 @@ import com.redis.stockanalysisagent.ratelimiting.RateLimitStatus;
 import com.redis.stockanalysisagent.ratelimiting.RateLimitStatusProvider;
 import com.redis.stockanalysisagent.session.*;
 import com.redis.stockanalysisagent.session.controller.vo.*;
+import com.redis.stockanalysisagent.session.dto.ChatSessionSummary;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
 import jakarta.validation.Valid;
@@ -155,7 +156,11 @@ public class ChatSessionController {
             sessions = sessionAccess.normalizeSessionIds(chatSessionService.listSessions(userId));
             sessionAccess.storeCachedChatSessions(session, sessions);
         }
-        return ResponseEntity.ok(new ChatSessionsResponse(sessions));
+        List<ChatSessionSummary> sessionDetails = chatSessionService.summarizeSessions(userId, sessions);
+        if (sessionDetails == null) {
+            sessionDetails = List.of();
+        }
+        return ResponseEntity.ok(new ChatSessionsResponse(sessions, sessionDetails));
     }
 
     @GetMapping("/session/{sessionId}")
@@ -170,7 +175,8 @@ public class ChatSessionController {
         return ResponseEntity.ok(new ChatSessionResponse(
                 normalizedUserId,
                 normalizedSessionId,
-                chatSessionService.getSessionMessages(normalizedUserId, normalizedSessionId)
+                chatSessionService.getSessionMessages(normalizedUserId, normalizedSessionId),
+                chatSessionService.sessionMetadata(normalizedUserId, normalizedSessionId)
         ));
     }
 

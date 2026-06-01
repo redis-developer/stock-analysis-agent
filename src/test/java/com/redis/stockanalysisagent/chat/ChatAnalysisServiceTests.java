@@ -124,6 +124,45 @@ class ChatAnalysisServiceTests {
         assertThat(analysisTurn.executionSteps())
                 .extracting(ChatExecutionStep::id)
                 .contains("SEMANTIC_CACHE_STORE");
+        assertThat(analysisTurn.tickers()).containsExactly("AAPL");
+        assertThat(analysisTurn.triggeredAgents()).containsExactly("MARKET_DATA");
+    }
+
+    @Test
+    void capturesResolvedTickersAndTriggeredAgents() {
+        CoordinatorResponse coordinatorResponse = new CoordinatorResponse();
+        coordinatorResponse.setFinishReason(CoordinatorResponse.FinishReason.COMPLETED);
+        coordinatorResponse.setFinalResponse("AAPL and MSFT were analyzed.");
+        coordinatorResponse.setResolvedTickers(List.of("AAPL", "MSFT"));
+        coordinatorResponse.setSelectedAgents(List.of(AgentType.MARKET_DATA, AgentType.NEWS, AgentType.SYNTHESIS));
+        CoordinatorAgent.CoordinationResult coordinationResult = new CoordinatorAgent.CoordinationResult(
+                coordinatorResponse,
+                List.of(
+                        new AgentExecution(AgentType.MARKET_DATA, "AAPL", "Fetched AAPL.", 10, null),
+                        new AgentExecution(AgentType.NEWS, "MSFT", "Fetched MSFT news.", 11, null),
+                        new AgentExecution(AgentType.SYNTHESIS, "AAPL,MSFT", "Synthesized comparison.", 12, null)
+                ),
+                null,
+                false,
+                false,
+                null,
+                0,
+                0,
+                false
+        );
+        when(coordinatorAgent.execute("Compare AAPL and MSFT", "alice:session-1", 4, true, "cache-key"))
+                .thenReturn(coordinationResult);
+
+        ChatAnalysisService.AnalysisTurn analysisTurn = chatAnalysisService.analyze(
+                "Compare AAPL and MSFT",
+                "alice:session-1",
+                4,
+                true,
+                "cache-key"
+        );
+
+        assertThat(analysisTurn.tickers()).containsExactly("AAPL", "MSFT");
+        assertThat(analysisTurn.triggeredAgents()).containsExactly("MARKET_DATA", "NEWS", "SYNTHESIS");
     }
 
     @Test

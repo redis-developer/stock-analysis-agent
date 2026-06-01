@@ -1,9 +1,11 @@
 package com.redis.stockanalysisagent.session;
 import com.redis.stockanalysisagent.session.controller.vo.ChatContextResponse;
 import com.redis.stockanalysisagent.session.controller.ChatSessionController;
+import com.redis.stockanalysisagent.session.controller.vo.ChatSessionResponse;
 import com.redis.stockanalysisagent.session.controller.vo.ChatSessionsResponse;
 import com.redis.stockanalysisagent.session.controller.vo.ChatSettingsRequest;
 import com.redis.stockanalysisagent.session.controller.vo.LoginRequest;
+import com.redis.stockanalysisagent.session.dto.ChatSessionMetadata;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -128,6 +130,20 @@ class ChatSessionControllerTests {
         assertThat(refreshedResponse).isNotNull();
         assertThat(refreshedResponse.sessions()).containsExactly("session-2", "session-1");
         verify(chatSessionService, times(2)).listSessions("alice");
+    }
+
+    @Test
+    void sessionEndpointReturnsSessionMetadata() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        controller.login(new LoginRequest("alice", 7, null, null, null), request);
+        when(chatSessionService.sessionMetadata("alice", "session-1"))
+                .thenReturn(new ChatSessionMetadata(List.of("AAPL"), List.of("MARKET_DATA")));
+
+        ChatSessionResponse response = controller.session("session-1", request).getBody();
+
+        assertThat(response).isNotNull();
+        assertThat(response.metadata().tickers()).containsExactly("AAPL");
+        assertThat(response.metadata().triggeredAgents()).containsExactly("MARKET_DATA");
     }
 
     @Test

@@ -45,19 +45,6 @@ variable "image" {
   default     = ""
 }
 
-variable "secret_values" {
-  description = "Secret values created in Secret Manager. Terraform state contains these values."
-  type = object({
-    openai_api_key       = string
-    redis_password       = string
-    langcache_api_key    = string
-    agent_memory_api_key = string
-    twelve_data_api_key  = string
-    tavily_api_key       = string
-  })
-  sensitive = true
-}
-
 variable "redis_host" {
   description = "Redis 8 compatible host."
   type        = string

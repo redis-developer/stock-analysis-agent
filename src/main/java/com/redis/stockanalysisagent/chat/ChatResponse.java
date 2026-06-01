@@ -20,6 +20,14 @@ public record ChatResponse(
         boolean semanticCachingEnabled,
         boolean rateLimitingEnabled,
         ExternalApiUsageSnapshot providerUsage,
-        long responseTimeMs
+        long responseTimeMs,
+        List<String> tickers,
+        List<String> triggeredAgents
 ) {
+    public ChatResponse {
+        retrievedMemories = retrievedMemories == null ? List.of() : List.copyOf(retrievedMemories);
+        executionSteps = executionSteps == null ? List.of() : List.copyOf(executionSteps);
+        tickers = tickers == null ? List.of() : List.copyOf(tickers);
+        triggeredAgents = triggeredAgents == null ? List.of() : List.copyOf(triggeredAgents);
+    }
 }

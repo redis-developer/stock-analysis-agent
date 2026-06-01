@@ -1,5 +1,6 @@
 package com.redis.stockanalysisagent.chat;
 
+import com.redis.stockanalysisagent.agent.TokenUsageSummary;
 import com.redis.stockanalysisagent.cache.ExternalDataAccess;
 
 import java.util.List;
@@ -11,6 +12,7 @@ public record ChatProgressStep(
         String status,
         Long durationMs,
         String summary,
+        TokenUsageSummary tokenUsage,
         Integer loop,
         List<ExternalDataAccess> dataAccesses
 ) {

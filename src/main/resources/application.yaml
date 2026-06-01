@@ -25,7 +25,7 @@ spring:
     timeout: 30m
   ai:
     openai:
-      api-key: ${OPENAI_API_KEY:${SPRING_AI_OPENAI_API_KEY:}}
+      api-key: ${STOCK_ANALYSIS_AGENT_OPENAI_API_KEY:${OPENAI_API_KEY:${SPRING_AI_OPENAI_API_KEY:}}}
       chat:
         options:
           model: gpt-4o
@@ -46,14 +46,14 @@ stock-analysis:
     provider: twelve-data
     twelve-data:
       base-url: https://api.twelvedata.com
-      api-key: ${TWELVE_DATA_API_KEY:}
+      api-key: ${STOCK_ANALYSIS_AGENT_TWELVE_DATA_API_KEY:${TWELVE_DATA_API_KEY:}}
   fundamentals:
     provider: sec
   news:
     provider: sec
     tavily:
       base-url: https://api.tavily.com
-      api-key: ${TAVILY_API_KEY:}
+      api-key: ${STOCK_ANALYSIS_AGENT_TAVILY_API_KEY:${TAVILY_API_KEY:}}
       max-results: 5
   technical-analysis:
     provider: twelve-data
@@ -71,7 +71,7 @@ stock-analysis:
     lang-cache:
       url: ${STOCK_ANALYSIS_AGENT_LANGCACHE_ENDPOINT}
       cache-id: ${STOCK_ANALYSIS_AGENT_LANGCACHE_CACHE_ID}
-      api-key: ${STOCK_ANALYSIS_AGENT_LANGCACHE_API_KEY}}
+      api-key: ${STOCK_ANALYSIS_AGENT_LANGCACHE_API_KEY}
       similarity-threshold: ${LANGCACHE_SIMILARITY_THRESHOLD:0.9}
       exact-search: ${LANGCACHE_EXACT_SEARCH:true}
       semantic-search: ${LANGCACHE_SEMANTIC_SEARCH:true}
@@ -85,7 +85,7 @@ stock-analysis:
 
 agent-memory:
   namespace: ${AGENT_MEMORY_NAMESPACE:stock-analysis}
-  url: ${STOCK_ANALYSIS_AGENT_AGENT_MEMORY_ENDPOINT:https://gcp-us-east4.memory.redis.io}
+  url: ${STOCK_ANALYSIS_AGENT_AGENT_MEMORY_ENDPOINT:}
   store-id: ${STOCK_ANALYSIS_AGENT_AGENT_MEMORY_STORE_ID:}
   api-key: ${STOCK_ANALYSIS_AGENT_AGENT_MEMORY_API_KEY:}
 app:

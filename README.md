@@ -53,11 +53,11 @@ The main configuration file is `src/main/resources/application.yaml`.
 Set these environment variables before running the app:
 
 ```bash
-export OPENAI_API_KEY=your_openai_api_key
+export STOCK_ANALYSIS_AGENT_OPENAI_API_KEY=your_openai_api_key
 export STOCK_ANALYSIS_AGENT_REDIS_HOST=localhost
 export STOCK_ANALYSIS_AGENT_REDIS_PORT=6379
-export LANGCACHE_URL=your_langcache_url
-export LANGCACHE_CACHE_ID=your_langcache_cache_id
+export STOCK_ANALYSIS_AGENT_LANGCACHE_ENDPOINT=your_langcache_url
+export STOCK_ANALYSIS_AGENT_LANGCACHE_CACHE_ID=your_langcache_cache_id
 export STOCK_ANALYSIS_AGENT_LANGCACHE_API_KEY=your_langcache_api_key
 export STOCK_ANALYSIS_AGENT_AGENT_MEMORY_ENDPOINT=your_agent_memory_endpoint
 export STOCK_ANALYSIS_AGENT_AGENT_MEMORY_STORE_ID=your_agent_memory_store_id
@@ -67,8 +67,8 @@ export STOCK_ANALYSIS_AGENT_AGENT_MEMORY_API_KEY=your_agent_memory_api_key
 Provider keys:
 
 ```bash
-export TWELVE_DATA_API_KEY=your_twelve_data_api_key
-export TAVILY_API_KEY=your_tavily_api_key
+export STOCK_ANALYSIS_AGENT_TWELVE_DATA_API_KEY=your_twelve_data_api_key
+export STOCK_ANALYSIS_AGENT_TAVILY_API_KEY=your_tavily_api_key
 export SEC_USER_AGENT="stock analysis agent you@example.com"
 ```
 
@@ -109,15 +109,6 @@ docker run --rm -p 8080:8080 --env-file .env stock-analysis-agent
 ```
 
 ## Cloud Run
-
-Terraform for Cloud Run is in `infra/terraform/cloudrun`.
-
-It creates Artifact Registry, Cloud Run, Secret Manager secrets, a runtime service account, and IAM. It applies these labels to labelable resources:
-
-```text
-owner=raphael_delio
-skip_deletion=yes
-```
 
 Use a Redis 8 compatible endpoint for the Redis settings.
 

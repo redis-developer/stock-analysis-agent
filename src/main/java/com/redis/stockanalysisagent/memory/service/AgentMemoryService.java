@@ -14,7 +14,6 @@ import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import java.time.Instant;
-import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -56,7 +55,7 @@ public class AgentMemoryService {
         } catch (WebClientResponseException.NotFound ignored) {
             return emptyWorkingMemory(sessionId, userId);
         } catch (WebClientResponseException e) {
-            throw new RuntimeException("Failed to get Agent Memory Server session memory", e);
+            throw new RuntimeException("Failed to get Agent Memory Server session memory: " + errorSummary(e), e);
         }
     }
 
@@ -82,8 +81,8 @@ public class AgentMemoryService {
                 if (response == null) {
                     return sessions;
                 }
-                if (response.items() != null) {
-                    for (String sessionId : response.items()) {
+                if (response.sessions() != null) {
+                    for (String sessionId : response.sessions()) {
                         if (!hasText(userId) || sessionBelongsToUser(sessionId, userId)) {
                             sessions.add(sessionId);
                         }
@@ -93,7 +92,7 @@ public class AgentMemoryService {
             } while (hasText(pageToken));
             return sessions;
         } catch (WebClientResponseException e) {
-            throw new RuntimeException("Failed to list Agent Memory Server session memories", e);
+            throw new RuntimeException("Failed to list Agent Memory Server session memories: " + errorSummary(e), e);
         }
     }
 
@@ -108,7 +107,39 @@ public class AgentMemoryService {
         }
 
         for (MemoryMessage message : messages) {
-            addSessionEvent(sessionId, message, userId);
+            appendMessageToWorkingMemory(sessionId, message, userId, modelName, Map.of());
+        }
+    }
+
+    public void appendMessageToWorkingMemory(
+            String sessionId,
+            MemoryMessage message,
+            String userId,
+            String modelName,
+            Map<String, Object> metadata
+    ) {
+        if (message == null) {
+            return;
+        }
+
+        addSessionEvent(sessionId, message, userId, metadata);
+    }
+
+    public List<SessionEvent> listSessionEvents(String sessionId, String userId) {
+        if (!hasText(sessionId)) {
+            return List.of();
+        }
+
+        try {
+            SessionMemory sessionMemory = fetchSessionMemory(sessionId);
+            if (!isOwnedBy(sessionMemory, userId) || sessionMemory.events() == null) {
+                return List.of();
+            }
+            return sessionMemory.events();
+        } catch (WebClientResponseException.NotFound ignored) {
+            return List.of();
+        } catch (RuntimeException e) {
+            throw new RuntimeException("Failed to list Agent Memory Server session events", e);
         }
     }
 
@@ -136,7 +167,7 @@ public class AgentMemoryService {
                     .block();
         } catch (WebClientResponseException.NotFound ignored) {
         } catch (WebClientResponseException e) {
-            throw new RuntimeException("Failed to delete Agent Memory Server session memory", e);
+            throw new RuntimeException("Failed to delete Agent Memory Server session memory: " + errorSummary(e), e);
         }
     }
 
@@ -174,7 +205,7 @@ public class AgentMemoryService {
             } while (hasText(pageToken));
             return memories;
         } catch (WebClientResponseException e) {
-            throw new RuntimeException("Failed to list Agent Memory Server long term memories", e);
+            throw new RuntimeException("Failed to list Agent Memory Server long term memories: " + errorSummary(e), e);
         }
     }
 
@@ -213,7 +244,7 @@ public class AgentMemoryService {
             }
             return response.created().getFirst();
         } catch (WebClientResponseException e) {
-            throw new RuntimeException("Failed to create Agent Memory Server long term memory", e);
+            throw new RuntimeException("Failed to create Agent Memory Server long term memory: " + errorSummary(e), e);
         }
     }
 
@@ -262,7 +293,7 @@ public class AgentMemoryService {
             } while (memories.size() < requestedLimit && hasText(pageToken));
             return new MemoryRecordResults(memories, memories.size());
         } catch (WebClientResponseException e) {
-            throw new RuntimeException("Failed to search Agent Memory Server long term memory", e);
+            throw new RuntimeException("Failed to search Agent Memory Server long term memory: " + errorSummary(e), e);
         }
     }
 
@@ -370,14 +401,24 @@ public class AgentMemoryService {
                         && userId.equals(event.actorId()));
     }
 
-    private SessionEvent addSessionEvent(String sessionId, MemoryMessage message, String userId) {
+    private SessionEvent addSessionEvent(
+            String sessionId,
+            MemoryMessage message,
+            String userId,
+            Map<String, Object> metadata
+    ) {
+        Map<String, Object> eventMetadata = new java.util.LinkedHashMap<>();
+        eventMetadata.put("namespace", namespace);
+        if (metadata != null) {
+            eventMetadata.putAll(metadata);
+        }
         AddSessionEventRequest request = new AddSessionEventRequest(
                 sessionId,
                 actorId(message, userId),
                 toAgentMemoryRole(message.getRole()),
                 List.of(ContentPart.text(message.getContent())),
                 createdAt(message),
-                Map.of("namespace", namespace)
+                eventMetadata
         );
 
         try {
@@ -392,7 +433,7 @@ public class AgentMemoryService {
             }
             return response.event();
         } catch (WebClientResponseException e) {
-            throw new RuntimeException("Failed to append Agent Memory Server session event", e);
+            throw new RuntimeException("Failed to append Agent Memory Server session event: " + errorSummary(e), e);
         }
     }
 
@@ -417,7 +458,7 @@ public class AgentMemoryService {
                 }
                 deleted += response != null && response.deleted() != null ? response.deleted().size() : batch.size();
             } catch (WebClientResponseException e) {
-                throw new RuntimeException("Failed to delete Agent Memory Server long term memories", e);
+                throw new RuntimeException("Failed to delete Agent Memory Server long term memories: " + errorSummary(e), e);
             }
         }
         return deleted;
@@ -526,7 +567,15 @@ public class AgentMemoryService {
     }
 
     private Instant parseInstant(String value) {
-        return hasText(value) ? OffsetDateTime.parse(value).toInstant() : Instant.now();
+        return hasText(value) ? Instant.parse(value) : Instant.now();
+    }
+
+    private String errorSummary(WebClientResponseException e) {
+        String body = e.getResponseBodyAsString();
+        if (body == null || body.isBlank()) {
+            return e.getStatusCode().toString();
+        }
+        return e.getStatusCode() + " " + body;
     }
 
     private static String requireText(String value, String propertyName) {

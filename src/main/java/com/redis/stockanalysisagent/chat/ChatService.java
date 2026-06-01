@@ -6,9 +6,6 @@ import com.redis.stockanalysisagent.memory.AmsChatMemoryRepository;
 import com.redis.stockanalysisagent.session.ConversationId;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.ai.chat.memory.ChatMemory;
-import org.springframework.ai.chat.messages.AssistantMessage;
-import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -20,20 +17,17 @@ public class ChatService {
     private static final Logger log = LoggerFactory.getLogger(ChatService.class);
     private static final String KIND_SYSTEM = "system";
 
-    private final ChatMemory chatMemory;
     private final AmsChatMemoryRepository memoryRepository;
     private final ChatAnalysisService chatAnalysisService;
     private final ExternalDataCache externalDataCache;
     private final ChatProgressPublisher progressPublisher;
 
     public ChatService(
-            ChatMemory chatMemory,
             AmsChatMemoryRepository memoryRepository,
             ChatAnalysisService chatAnalysisService,
             ExternalDataCache externalDataCache,
             ChatProgressPublisher progressPublisher
     ) {
-        this.chatMemory = chatMemory;
         this.memoryRepository = memoryRepository;
         this.chatAnalysisService = chatAnalysisService;
         this.externalDataCache = externalDataCache;
@@ -89,7 +83,8 @@ public class ChatService {
                 "Analyzing request",
                 ChatProgressPublisher.KIND_SYSTEM,
                 sumDurationMs(executionSteps),
-                "Completed the stock analysis request."
+                "Completed the stock analysis request.",
+                analysisTurn.tokenUsage()
         );
 
         long saveTurnStartedAt = System.nanoTime();
@@ -99,7 +94,14 @@ public class ChatService {
                 ChatProgressPublisher.KIND_SYSTEM,
                 "Saving the user message and assistant response."
         );
-        boolean saveSucceeded = saveTurn(conversationId, normalizedMessage, analysisTurn.response());
+        boolean saveSucceeded = saveTurn(
+                conversationId,
+                normalizedMessage,
+                analysisTurn.response(),
+                executionSteps,
+                analysisTurn.tickers(),
+                analysisTurn.triggeredAgents()
+        );
         ChatExecutionStep saveStep = systemStep(
                 "TURN_SAVE",
                 "Turn save",
@@ -123,14 +125,22 @@ public class ChatService {
                 analysisTurn.fromSemanticCache(),
                 analysisTurn.fromSemanticGuardrail(),
                 analysisTurn.tokenUsage(),
-                List.copyOf(executionSteps)
+                List.copyOf(executionSteps),
+                analysisTurn.tickers(),
+                analysisTurn.triggeredAgents()
         );
     }
 
-    private boolean saveTurn(String conversationId, String message, String response) {
+    private boolean saveTurn(
+            String conversationId,
+            String message,
+            String response,
+            List<ChatExecutionStep> executionSteps,
+            List<String> tickers,
+            List<String> triggeredAgents
+    ) {
         try {
-            chatMemory.add(conversationId, new UserMessage(message));
-            chatMemory.add(conversationId, new AssistantMessage(response));
+            memoryRepository.saveTurn(conversationId, message, response, executionSteps, tickers, triggeredAgents);
             return true;
         } catch (RuntimeException ex) {
             log.warn("Skipping working-memory save because chat persistence failed.", ex);
@@ -180,7 +190,37 @@ public class ChatService {
             boolean fromSemanticCache,
             boolean fromSemanticGuardrail,
             TokenUsageSummary tokenUsage,
-            List<ChatExecutionStep> executionSteps
+            List<ChatExecutionStep> executionSteps,
+            List<String> tickers,
+            List<String> triggeredAgents
     ) {
+        public ChatTurn(
+                String conversationId,
+                String response,
+                List<String> retrievedMemories,
+                boolean fromSemanticCache,
+                boolean fromSemanticGuardrail,
+                TokenUsageSummary tokenUsage,
+                List<ChatExecutionStep> executionSteps
+        ) {
+            this(
+                    conversationId,
+                    response,
+                    retrievedMemories,
+                    fromSemanticCache,
+                    fromSemanticGuardrail,
+                    tokenUsage,
+                    executionSteps,
+                    List.of(),
+                    List.of()
+            );
+        }
+
+        public ChatTurn {
+            retrievedMemories = retrievedMemories == null ? List.of() : List.copyOf(retrievedMemories);
+            executionSteps = executionSteps == null ? List.of() : List.copyOf(executionSteps);
+            tickers = tickers == null ? List.of() : List.copyOf(tickers);
+            triggeredAgents = triggeredAgents == null ? List.of() : List.copyOf(triggeredAgents);
+        }
     }
 }

@@ -4,10 +4,12 @@ import com.redis.stockanalysisagent.cache.ExternalApiUsageService;
 import com.redis.stockanalysisagent.cache.ExternalApiUsageSnapshot;
 import com.redis.stockanalysisagent.session.ChatSessionAccess;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -74,25 +76,37 @@ public class ChatController {
     @PostMapping(value = "/stream", produces = MediaType.APPLICATION_NDJSON_VALUE)
     public ResponseEntity<StreamingResponseBody> chatStream(
             @Valid @RequestBody ChatRequest request,
-            HttpServletRequest httpRequest
+            HttpServletRequest httpRequest,
+            HttpServletResponse httpResponse
     ) {
         PreparedChatRequest prepared = prepareChat(request, httpRequest);
+        prepareStreamingResponse(httpResponse);
         StreamingResponseBody body = outputStream -> {
             try {
                 ChatResponse response = progressPublisher.capture(
-                        event -> writeJsonLine(outputStream, event),
+                        event -> writeJsonLine(outputStream, httpResponse, event),
                         () -> executeChat(prepared)
                 );
-                writeJsonLine(outputStream, ChatProgressEvent.finalResponse(response));
+                writeJsonLine(outputStream, httpResponse, ChatProgressEvent.finalResponse(response));
             } catch (UncheckedIOException ignored) {
             } catch (RuntimeException ex) {
-                writeJsonLine(outputStream, ChatProgressEvent.error(errorMessage(ex)));
+                writeJsonLine(outputStream, httpResponse, ChatProgressEvent.error(errorMessage(ex)));
             }
         };
 
         return ResponseEntity.ok()
+                .header(HttpHeaders.CACHE_CONTROL, "no-cache, no-transform")
+                .header("X-Accel-Buffering", "no")
+                .header("X-Content-Type-Options", "nosniff")
                 .contentType(MediaType.APPLICATION_NDJSON)
                 .body(body);
+    }
+
+    private void prepareStreamingResponse(HttpServletResponse response) {
+        response.setHeader(HttpHeaders.CACHE_CONTROL, "no-cache, no-transform");
+        response.setHeader("X-Accel-Buffering", "no");
+        response.setHeader("X-Content-Type-Options", "nosniff");
+        response.setBufferSize(1);
     }
 
     private PreparedChatRequest prepareChat(ChatRequest request, HttpServletRequest httpRequest) {
@@ -158,7 +172,9 @@ public class ChatController {
                 prepared.semanticCachingEnabled(),
                 prepared.rateLimitingEnabled(),
                 providerUsageSnapshot(),
-                responseTimeMs
+                responseTimeMs,
+                turn.tickers(),
+                turn.triggeredAgents()
         );
     }
 
@@ -170,11 +186,12 @@ public class ChatController {
         return apiUsageService.snapshot();
     }
 
-    private void writeJsonLine(OutputStream outputStream, ChatProgressEvent event) {
+    private void writeJsonLine(OutputStream outputStream, HttpServletResponse response, ChatProgressEvent event) {
         try {
             OBJECT_MAPPER.writeValue(outputStream, event);
             outputStream.write('\n');
             outputStream.flush();
+            response.flushBuffer();
         } catch (IOException ex) {
             throw new UncheckedIOException(ex);
         }

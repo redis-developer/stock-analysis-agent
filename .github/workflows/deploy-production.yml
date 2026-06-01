@@ -1,0 +1,177 @@
+name: Deploy production
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+env:
+  TF_DIR: infra/terraform/cloudrun
+  TF_STATE_PREFIX: ${{ vars.TF_STATE_PREFIX || 'stock-analysis-agent/prod' }}
+  GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  GCP_REGION: ${{ vars.GCP_REGION || 'us-central1' }}
+  GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+  GCP_DEPLOYER_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOYER_SERVICE_ACCOUNT }}
+  TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+  ARTIFACT_REGISTRY_REPOSITORY_ID: ${{ vars.ARTIFACT_REGISTRY_REPOSITORY_ID || 'stock-analysis-agent' }}
+  IMAGE_NAME: ${{ vars.IMAGE_NAME || 'stock-analysis-agent' }}
+  CLOUD_RUN_SMOKE_TEST: ${{ vars.CLOUD_RUN_SMOKE_TEST || 'true' }}
+  TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
+  TF_VAR_region: ${{ vars.GCP_REGION || 'us-central1' }}
+  TF_VAR_service_name: ${{ vars.CLOUD_RUN_SERVICE_NAME || 'stock-analysis-agent' }}
+  TF_VAR_artifact_registry_repository_id: ${{ vars.ARTIFACT_REGISTRY_REPOSITORY_ID || 'stock-analysis-agent' }}
+  TF_VAR_image_name: ${{ vars.IMAGE_NAME || 'stock-analysis-agent' }}
+  TF_VAR_redis_host: ${{ vars.STOCK_ANALYSIS_AGENT_REDIS_HOST }}
+  TF_VAR_redis_port: ${{ vars.STOCK_ANALYSIS_AGENT_REDIS_PORT || '6379' }}
+  TF_VAR_redis_username: ${{ vars.STOCK_ANALYSIS_AGENT_REDIS_USERNAME || 'default' }}
+  TF_VAR_langcache_url: ${{ vars.STOCK_ANALYSIS_AGENT_LANGCACHE_ENDPOINT }}
+  TF_VAR_langcache_cache_id: ${{ vars.STOCK_ANALYSIS_AGENT_LANGCACHE_CACHE_ID }}
+  TF_VAR_agent_memory_endpoint: ${{ vars.STOCK_ANALYSIS_AGENT_AGENT_MEMORY_ENDPOINT }}
+  TF_VAR_agent_memory_store_id: ${{ vars.STOCK_ANALYSIS_AGENT_AGENT_MEMORY_STORE_ID }}
+  TF_VAR_sec_user_agent: ${{ vars.SEC_USER_AGENT }}
+  TF_VAR_ingress: ${{ vars.CLOUD_RUN_INGRESS || 'INGRESS_TRAFFIC_ALL' }}
+  TF_VAR_allow_unauthenticated: ${{ vars.CLOUD_RUN_ALLOW_UNAUTHENTICATED || 'true' }}
+  TF_VAR_vpc_connector: ${{ vars.CLOUD_RUN_VPC_CONNECTOR || '' }}
+  TF_VAR_vpc_egress: ${{ vars.CLOUD_RUN_VPC_EGRESS || 'PRIVATE_RANGES_ONLY' }}
+
+jobs:
+  deploy:
+    name: Build and deploy
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 25
+          cache: gradle
+
+      - name: Test
+        run: ./gradlew test
+
+      - name: Validate required configuration
+        shell: bash
+        run: |
+          required_names=(
+            GCP_PROJECT_ID
+            GCP_WORKLOAD_IDENTITY_PROVIDER
+            GCP_DEPLOYER_SERVICE_ACCOUNT
+            TF_STATE_BUCKET
+            TF_VAR_redis_host
+            TF_VAR_langcache_url
+            TF_VAR_langcache_cache_id
+            TF_VAR_agent_memory_endpoint
+            TF_VAR_agent_memory_store_id
+            TF_VAR_sec_user_agent
+          )
+
+          missing=0
+          for name in "${required_names[@]}"; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Missing GitHub variable or environment value: ${name}"
+              missing=1
+            fi
+          done
+
+          if [ "${missing}" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOYER_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform init
+        run: |
+          terraform -chdir="${TF_DIR}" init -input=false \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="prefix=${TF_STATE_PREFIX}"
+
+      - name: Terraform validate
+        run: terraform -chdir="${TF_DIR}" validate
+
+      - name: Bootstrap cloud resources
+        run: |
+          terraform -chdir="${TF_DIR}" apply -input=false -auto-approve \
+            -target=google_project_service.required \
+            -target=google_artifact_registry_repository.app \
+            -target=google_secret_manager_secret.app
+
+      - name: Check production secret versions
+        shell: bash
+        run: |
+          secret_ids=(
+            STOCK_ANALYSIS_AGENT_OPENAI_API_KEY
+            STOCK_ANALYSIS_AGENT_REDIS_PASSWORD
+            STOCK_ANALYSIS_AGENT_LANGCACHE_API_KEY
+            STOCK_ANALYSIS_AGENT_AGENT_MEMORY_API_KEY
+            STOCK_ANALYSIS_AGENT_TWELVE_DATA_API_KEY
+            STOCK_ANALYSIS_AGENT_TAVILY_API_KEY
+          )
+
+          missing=0
+          for secret_id in "${secret_ids[@]}"; do
+            if ! gcloud secrets versions list "${secret_id}" \
+              --project="${GCP_PROJECT_ID}" \
+              --filter="state=ENABLED" \
+              --format="value(name)" \
+              --limit=1 | grep -q .; then
+              echo "::error::Missing enabled Secret Manager version: ${secret_id}"
+              missing=1
+            fi
+          done
+
+          if [ "${missing}" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Set image tag
+        shell: bash
+        run: |
+          image="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${ARTIFACT_REGISTRY_REPOSITORY_ID}/${IMAGE_NAME}:${GITHUB_SHA}"
+          echo "IMAGE=${image}" >> "${GITHUB_ENV}"
+          echo "TF_VAR_image=${image}" >> "${GITHUB_ENV}"
+
+      - name: Build and push image
+        run: gcloud builds submit . --tag="${IMAGE}" --project="${GCP_PROJECT_ID}"
+
+      - name: Terraform plan
+        run: terraform -chdir="${TF_DIR}" plan -input=false -out="${RUNNER_TEMP}/tfplan"
+
+      - name: Terraform apply
+        run: terraform -chdir="${TF_DIR}" apply -input=false -auto-approve "${RUNNER_TEMP}/tfplan"
+
+      - name: Smoke test
+        shell: bash
+        run: |
+          if [ "${CLOUD_RUN_SMOKE_TEST}" = "false" ]; then
+            exit 0
+          fi
+
+          service_uri="$(terraform -chdir="${TF_DIR}" output -raw service_uri)"
+          curl --fail --silent --show-error --location "${service_uri}/" >/dev/null

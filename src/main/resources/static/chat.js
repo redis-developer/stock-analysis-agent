@@ -3,6 +3,8 @@
     const sessionLabelsStorageKey = "stock-analysis-chat:session-labels";
     const maxRetrievedMemoriesLimit = 20;
     const defaultRateLimitLimit = 6;
+    const memoryTabAll = "all";
+    const memoryTabCurrentChat = "current-chat";
 
     const state = {
         loading: false,
@@ -13,11 +15,17 @@
         messagesBySession: {},
         pendingSessions: {},
         pendingProgressBySession: {},
+        pendingProgressStartedAtBySession: {},
+        progressClock: null,
         sessions: [],
         memories: [],
+        memoryTab: memoryTabAll,
         caches: [],
         memoriesOpen: false,
+        memoryCreateOpen: false,
         cacheOpen: false,
+        mobileSessionsOpen: false,
+        mobileToolsOpen: false,
         sessionId: null,
         userId: null,
         defaultRetrievedMemoriesLimit: 10,
@@ -49,6 +57,10 @@
         messages: document.getElementById("messages"),
         composer: document.getElementById("composer"),
         sendButton: document.getElementById("send-button"),
+        mobileSessionsButton: document.getElementById("mobile-sessions-button"),
+        mobileNewSessionButton: document.getElementById("mobile-new-session-button"),
+        mobileToolsButton: document.getElementById("mobile-tools-button"),
+        mobileCloseSessionsButton: document.getElementById("mobile-close-sessions-button"),
         cacheButton: document.getElementById("cache-button"),
         cacheSidebar: document.getElementById("cache-sidebar"),
         closeCacheButton: document.getElementById("close-cache-button"),
@@ -63,10 +75,13 @@
         memoryTopicsInput: document.getElementById("memory-topics-input"),
         memoryCreateError: document.getElementById("memory-create-error"),
         createMemoryButton: document.getElementById("create-memory-button"),
+        addMemoryButton: document.getElementById("add-memory-button"),
+        closeMemoryFormButton: document.getElementById("close-memory-form-button"),
         closeMemoriesButton: document.getElementById("close-memories-button"),
         flushMemoriesButton: document.getElementById("flush-memories-button"),
         memoriesList: document.getElementById("memories-list"),
         memoriesEmpty: document.getElementById("memories-empty"),
+        memoryTabButtons: Array.from(document.querySelectorAll("[data-memory-tab]")),
         refreshSessionsButton: document.getElementById("refresh-sessions-button"),
         newSessionButton: document.getElementById("new-session-button"),
         sessionsList: document.getElementById("sessions-list"),
@@ -98,16 +113,25 @@
         elements.composer.addEventListener("submit", onSubmit);
         elements.refreshSessionsButton.addEventListener("click", onRefreshSessionsClick);
         elements.newSessionButton.addEventListener("click", startNewSession);
+        elements.mobileSessionsButton.addEventListener("click", onMobileSessionsClick);
+        elements.mobileNewSessionButton.addEventListener("click", onMobileNewSessionClick);
+        elements.mobileToolsButton.addEventListener("click", onMobileToolsClick);
+        elements.mobileCloseSessionsButton.addEventListener("click", closeMobileSessions);
         elements.sessionsList.addEventListener("click", onSessionClick);
         elements.cacheButton.addEventListener("click", onCacheButtonClick);
         elements.closeCacheButton.addEventListener("click", closeCache);
         elements.refreshCacheButton.addEventListener("click", onRefreshCacheClick);
         elements.cacheList.addEventListener("click", onCacheClick);
         elements.memoriesButton.addEventListener("click", onMemoriesButtonClick);
+        elements.addMemoryButton.addEventListener("click", onAddMemoryClick);
+        elements.closeMemoryFormButton.addEventListener("click", closeMemoryCreatePopup);
         elements.memoryCreateForm.addEventListener("submit", onMemoryCreateSubmit);
         elements.closeMemoriesButton.addEventListener("click", closeMemories);
         elements.memoriesList.addEventListener("click", onMemoryClick);
         elements.flushMemoriesButton.addEventListener("click", flushMemories);
+        elements.memoryTabButtons.forEach(function (button) {
+            button.addEventListener("click", onMemoryTabClick);
+        });
         elements.questionInput.addEventListener("input", autoResizeTextarea);
         elements.questionInput.addEventListener("keydown", onComposerKeydown);
         elements.messages.addEventListener("click", onSuggestionClick);
@@ -164,6 +188,8 @@
         elements.loginScreen.hidden = true;
         elements.chatApp.hidden = false;
         closeAccountMenu();
+        closeMobileSessions();
+        closeMobileTools();
         applySessionManagementState();
         renderIdentity();
         renderSessions();
@@ -183,6 +209,8 @@
         elements.chatApp.hidden = true;
         elements.loginScreen.hidden = false;
         closeAccountMenu();
+        closeMobileSessions();
+        closeMobileTools();
         closeCache();
         closeMemories();
         elements.usernameInput.value = "";
@@ -203,15 +231,24 @@
 
     function onDocumentClick(event) {
         if (elements.accountMenu.hidden || event.target.closest(".sidebar-account")) {
-            return;
+            if (!state.mobileToolsOpen || event.target.closest(".header-actions") || event.target.closest("#mobile-tools-button")) {
+                return;
+            }
         }
 
         closeAccountMenu();
+        closeMobileTools();
     }
 
     function onDocumentKeydown(event) {
         if (event.key === "Escape") {
+            if (state.memoryCreateOpen) {
+                closeMemoryCreatePopup();
+                return;
+            }
             closeAccountMenu();
+            closeMobileSessions();
+            closeMobileTools();
             closeCache();
             closeMemories();
         }
@@ -240,9 +277,13 @@
         state.pendingProgressBySession = {};
         state.sessions = [];
         state.memories = [];
+        state.memoryTab = memoryTabAll;
         state.caches = [];
         state.memoriesOpen = false;
+        state.memoryCreateOpen = false;
         state.cacheOpen = false;
+        state.mobileSessionsOpen = false;
+        state.mobileToolsOpen = false;
         state.apiCachingEnabled = true;
         state.semanticCachingEnabled = true;
         state.rateLimitingEnabled = true;
@@ -260,6 +301,48 @@
 
     function closeAccountMenu() {
         setAccountMenuOpen(false);
+    }
+
+    function onMobileSessionsClick(event) {
+        event.stopPropagation();
+        if (!isSessionManagementEnabled()) {
+            return;
+        }
+
+        setMobileSessionsOpen(!state.mobileSessionsOpen);
+        closeMobileTools();
+    }
+
+    function onMobileNewSessionClick() {
+        startNewSession();
+        closeMobileSessions();
+        closeMobileTools();
+    }
+
+    function onMobileToolsClick(event) {
+        event.stopPropagation();
+        setMobileToolsOpen(!state.mobileToolsOpen);
+        closeMobileSessions();
+    }
+
+    function setMobileSessionsOpen(isOpen) {
+        state.mobileSessionsOpen = Boolean(isOpen) && isSessionManagementEnabled();
+        elements.chatApp.classList.toggle("chat-app--mobile-sessions-open", state.mobileSessionsOpen);
+        elements.mobileSessionsButton.setAttribute("aria-expanded", String(state.mobileSessionsOpen));
+    }
+
+    function closeMobileSessions() {
+        setMobileSessionsOpen(false);
+    }
+
+    function setMobileToolsOpen(isOpen) {
+        state.mobileToolsOpen = Boolean(isOpen);
+        elements.chatApp.classList.toggle("chat-app--mobile-tools-open", state.mobileToolsOpen);
+        elements.mobileToolsButton.setAttribute("aria-expanded", String(state.mobileToolsOpen));
+    }
+
+    function closeMobileTools() {
+        setMobileToolsOpen(false);
     }
 
     function onComposerKeydown(event) {
@@ -405,6 +488,28 @@
         await openMemories();
     }
 
+    function onMemoryTabClick(event) {
+        const button = event.currentTarget;
+        const nextTab = normalizeMemoryTab(button && button.dataset.memoryTab);
+        if (nextTab === state.memoryTab) {
+            return;
+        }
+
+        state.memoryTab = nextTab;
+        renderMemories();
+    }
+
+    function onAddMemoryClick() {
+        if (!isSessionManagementEnabled() || state.memoriesLoading) {
+            return;
+        }
+
+        setMemoryCreateOpen(true);
+        window.setTimeout(function () {
+            elements.memoryTextInput.focus();
+        }, 0);
+    }
+
     async function onMemoryClick(event) {
         const deleteButton = event.target.closest(".memory-list__delete");
         if (!deleteButton) {
@@ -456,6 +561,22 @@
         clearMemoryCreateError();
     }
 
+    function closeMemoryCreatePopup() {
+        setMemoryCreateOpen(false);
+        clearMemoryCreateError();
+    }
+
+    function setMemoryCreateOpen(isOpen) {
+        state.memoryCreateOpen = Boolean(isOpen) && state.memoriesOpen && isSessionManagementEnabled();
+        elements.chatApp.classList.toggle("chat-app--memory-create-open", state.memoryCreateOpen);
+        elements.addMemoryButton.setAttribute("aria-expanded", String(state.memoryCreateOpen));
+        if (state.memoryCreateOpen) {
+            elements.memoryCreateForm.dataset.open = "true";
+        } else {
+            delete elements.memoryCreateForm.dataset.open;
+        }
+    }
+
     function startNewSession() {
         if (!isSessionManagementEnabled()) {
             return;
@@ -468,6 +589,8 @@
         renderIdentity();
         renderSessions();
         renderMessages();
+        closeMobileSessions();
+        closeMobileTools();
         setStatus("New session ready");
         elements.questionInput.focus();
     }
@@ -485,6 +608,8 @@
         renderIdentity();
         renderSessions();
         renderMessages();
+        closeMobileSessions();
+        closeMobileTools();
         if (isSessionPending(sessionId)) {
             setStatus("Analyzing");
         } else {
@@ -620,6 +745,7 @@
                 renderIdentity();
             }
 
+            const executionSteps = Array.isArray(response.executionSteps) ? response.executionSteps : [];
             appendSessionMessage(responseSessionId, {
                 role: "assistant",
                 content: response.response || "No response returned.",
@@ -628,7 +754,8 @@
                 fromSemanticCache: Boolean(response.fromSemanticCache),
                 fromSemanticGuardrail: Boolean(response.fromSemanticGuardrail),
                 tokenUsage: normalizeTokenUsage(response.tokenUsage),
-                executionSteps: Array.isArray(response.executionSteps) ? response.executionSteps : [],
+                executionSteps: executionSteps,
+                activitySteps: assistantActivitySteps(requestSessionId, executionSteps),
                 responseTimeMs: Number.isFinite(response.responseTimeMs) ? response.responseTimeMs : null
             });
             if (isSessionManagementEnabled()) {
@@ -915,7 +1042,10 @@
             if (requestedUserId !== activeUserId()) {
                 return;
             }
-            state.sessions = normalizeSessionList(body && body.sessions);
+            const sessionItems = body && Array.isArray(body.sessionDetails) && body.sessionDetails.length > 0
+                ? body.sessionDetails
+                : body && body.sessions;
+            state.sessions = normalizeSessionList(sessionItems);
             if (reportStatus) {
                 setStatus("Sessions refreshed");
             }
@@ -932,10 +1062,13 @@
         }
 
         renderSessions();
+        renderIdentity();
     }
 
     async function openCache() {
         closeMemories();
+        closeMobileSessions();
+        closeMobileTools();
         setCacheOpen(true);
         await refreshCache(true);
     }
@@ -1048,11 +1181,14 @@
 
     async function openMemories() {
         closeCache();
+        closeMobileSessions();
+        closeMobileTools();
         setMemoriesOpen(true);
         await refreshMemories(true);
     }
 
     function closeMemories() {
+        closeMemoryCreatePopup();
         setMemoriesOpen(false);
     }
 
@@ -1061,6 +1197,9 @@
         elements.memorySidebar.hidden = !state.memoriesOpen;
         elements.memoriesButton.setAttribute("aria-expanded", String(state.memoriesOpen));
         elements.chatApp.classList.toggle("chat-app--memories-open", state.memoriesOpen);
+        if (!state.memoriesOpen) {
+            setMemoryCreateOpen(false);
+        }
         if (state.memoriesOpen) {
             renderMemories();
         }
@@ -1139,6 +1278,7 @@
             }
 
             clearMemoryCreateForm();
+            closeMemoryCreatePopup();
             await refreshMemories(false);
             setStatus("Memory created");
         } catch (error) {
@@ -1324,7 +1464,7 @@
         }
 
         if (state.loading) {
-            elements.messages.appendChild(buildTypingIndicator(sessionProgress(state.sessionId)));
+            elements.messages.appendChild(buildTypingIndicator(sessionProgress(state.sessionId), state.sessionId));
         }
 
         scrollMessagesToBottom();
@@ -1355,6 +1495,9 @@
         );
         renderRateLimitStatus();
         renderProviderUsage();
+        if (state.memoriesOpen) {
+            renderMemories();
+        }
     }
 
     function renderRateLimitStatus() {
@@ -1406,6 +1549,8 @@
     }
 
     function renderMemories() {
+        renderMemoryTabs();
+
         if (!isSessionManagementEnabled()) {
             state.memories = [];
             elements.memoriesList.replaceChildren();
@@ -1414,22 +1559,76 @@
             elements.memoryTypeInput.disabled = true;
             elements.memoryTopicsInput.disabled = true;
             elements.createMemoryButton.disabled = true;
+            elements.addMemoryButton.disabled = true;
             return;
         }
 
-        const memories = normalizeMemories(state.memories);
+        const allMemories = normalizeMemories(state.memories);
+        const memories = visibleMemories(allMemories);
         elements.memoriesList.replaceChildren();
 
         for (const memory of memories) {
             elements.memoriesList.appendChild(buildMemoryListItem(memory));
         }
 
+        elements.memoriesEmpty.textContent = emptyMemoriesLabel();
         elements.memoriesEmpty.hidden = memories.length > 0 || state.memoriesLoading;
-        elements.flushMemoriesButton.disabled = state.memoriesLoading || memories.length === 0;
+        elements.flushMemoriesButton.disabled = state.memoriesLoading || allMemories.length === 0;
         elements.memoryTextInput.disabled = state.memoriesLoading;
         elements.memoryTypeInput.disabled = state.memoriesLoading;
         elements.memoryTopicsInput.disabled = state.memoriesLoading;
         elements.createMemoryButton.disabled = state.memoriesLoading;
+        elements.addMemoryButton.disabled = state.memoriesLoading;
+    }
+
+    function renderMemoryTabs() {
+        state.memoryTab = normalizeMemoryTab(state.memoryTab);
+        elements.memoryTabButtons.forEach(function (button) {
+            const isActive = normalizeMemoryTab(button.dataset.memoryTab) === state.memoryTab;
+            button.classList.toggle("is-active", isActive);
+            button.setAttribute("aria-selected", String(isActive));
+        });
+    }
+
+    function normalizeMemoryTab(tab) {
+        return tab === memoryTabCurrentChat ? memoryTabCurrentChat : memoryTabAll;
+    }
+
+    function visibleMemories(memories) {
+        if (state.memoryTab !== memoryTabCurrentChat) {
+            return memories;
+        }
+
+        const currentSessionId = normalizeSessionValue(state.sessionId);
+        if (!currentSessionId) {
+            return [];
+        }
+
+        return memories.filter(function (memory) {
+            return memoryBelongsToCurrentChat(memory, currentSessionId);
+        });
+    }
+
+    function memoryBelongsToCurrentChat(memory, currentSessionId) {
+        const memorySessionId = normalizeSessionValue(memory && memory.sessionId);
+        if (!memorySessionId) {
+            return false;
+        }
+
+        if (memorySessionId === currentSessionId) {
+            return true;
+        }
+
+        const currentUserId = activeUserId();
+        return Boolean(currentUserId) && memorySessionId === currentUserId + ":" + currentSessionId;
+    }
+
+    function emptyMemoriesLabel() {
+        if (state.memoryTab === memoryTabCurrentChat) {
+            return "No memories extracted from this chat yet.";
+        }
+
+        return "No long term memories yet.";
     }
 
     function renderCache() {
@@ -1631,8 +1830,10 @@
 
         const term = document.createElement("dt");
         term.textContent = label;
+        term.dataset.label = label;
         const detail = document.createElement("dd");
         detail.textContent = normalizedValue;
+        detail.dataset.label = label;
         container.append(term, detail);
     }
 
@@ -1789,8 +1990,13 @@
         }
         syncLoadingState();
         elements.newSessionButton.disabled = !enabled;
+        elements.mobileSessionsButton.disabled = !enabled;
+        elements.mobileNewSessionButton.disabled = !enabled;
         elements.refreshSessionsButton.disabled = state.sessionsRefreshing || !enabled;
         elements.memoriesButton.disabled = !enabled;
+        if (!enabled) {
+            closeMobileSessions();
+        }
     }
 
     function handleUnauthorizedResponse(response) {
@@ -1907,7 +2113,8 @@
         meta.className = "message__meta";
 
         const tokenUsage = resolveTokenUsage(message);
-        if (message.fromSemanticGuardrail || message.fromSemanticCache || message.responseTimeMs != null || tokenUsage) {
+        const responseTimeMs = message.role === "assistant" ? resolveMessageResponseTime(message) : null;
+        if (message.fromSemanticGuardrail || message.fromSemanticCache || responseTimeMs != null || tokenUsage) {
             const badges = document.createElement("div");
             badges.className = "message__badges";
 
@@ -1925,10 +2132,10 @@
                 badges.appendChild(cacheBadge);
             }
 
-            if (message.responseTimeMs != null) {
+            if (responseTimeMs != null) {
                 const durationBadge = document.createElement("span");
                 durationBadge.className = "badge badge--timing";
-                durationBadge.textContent = formatDuration(message.responseTimeMs);
+                durationBadge.textContent = formatTimeSpentBadge(responseTimeMs);
                 badges.appendChild(durationBadge);
             }
 
@@ -1968,6 +2175,7 @@
         const memories = Array.isArray(message.memories) ? message.memories : [];
         const hasExecutionMetadata = Array.isArray(message.executionSteps);
         const executionSteps = hasExecutionMetadata ? message.executionSteps : [];
+        const activitySteps = Array.isArray(message.activitySteps) ? message.activitySteps : [];
 
         if (memories.length > 0) {
             panels.push(buildDisclosurePanel("Retrieved memories", memories, function (memory) {
@@ -1977,14 +2185,10 @@
             }));
         }
 
-        if (message.role === "assistant" && hasExecutionMetadata) {
-            panels.push(buildDisclosurePanel(
-                "Execution breakdown",
-                buildExecutionItems(executionSteps),
-                renderExecutionBreakdownItem,
-                "No execution steps recorded.",
-                "message__disclosure-list--steps"
-            ));
+        if (message.role === "assistant" && activitySteps.length > 0) {
+            panels.push(buildActivityDisclosurePanel(activitySteps, message.responseTimeMs));
+        } else if (message.role === "assistant" && hasExecutionMetadata) {
+            panels.push(buildExecutionDisclosurePanel(executionSteps, message.responseTimeMs));
         }
 
         if (panels.length === 0) {
@@ -2248,6 +2452,66 @@
         return wrapper;
     }
 
+    function buildExecutionDisclosurePanel(executionSteps, responseTimeMs) {
+        const steps = Array.isArray(executionSteps) ? executionSteps : [];
+        const durationMs = Number.isFinite(responseTimeMs) ? responseTimeMs : sumStepDurations(steps);
+        const tokenUsage = sumStepTokenUsage(steps);
+        const panel = buildDisclosurePanel(
+            formatWorkSummaryLabel(durationMs, tokenUsage, "Worked"),
+            buildExecutionItems(steps),
+            renderExecutionBreakdownItem,
+            "No activity recorded.",
+            "message__disclosure-list--steps"
+        );
+        panel.classList.add("message__disclosure--activity");
+        return panel;
+    }
+
+    function buildActivityDisclosurePanel(activitySteps, responseTimeMs) {
+        const steps = visibleProgressSteps(activitySteps);
+        const durationMs = Number.isFinite(responseTimeMs) ? responseTimeMs : sumStepDurations(steps);
+        const tokenUsage = sumStepTokenUsage(steps);
+        const panel = buildDisclosureShell(formatWorkSummaryLabel(durationMs, tokenUsage, "Worked"), steps.length);
+        panel.classList.add("message__disclosure--activity");
+
+        if (steps.length === 0) {
+            const empty = document.createElement("p");
+            empty.className = "message__disclosure-empty";
+            empty.textContent = "No activity recorded.";
+            panel.appendChild(empty);
+            return panel;
+        }
+
+        const content = document.createElement("div");
+        content.className = "message__content message__activity-content";
+        content.appendChild(buildLiveActivityHeadline(steps));
+        content.appendChild(buildLiveActivityList(steps));
+        panel.appendChild(content);
+
+        return panel;
+    }
+
+    function buildDisclosureShell(title, countValue) {
+        const wrapper = document.createElement("details");
+        wrapper.className = "message__disclosure";
+
+        const summary = document.createElement("summary");
+        summary.className = "message__disclosure-summary";
+
+        const label = document.createElement("span");
+        label.className = "message__disclosure-label";
+        label.textContent = title;
+        summary.appendChild(label);
+
+        const count = document.createElement("span");
+        count.className = "message__disclosure-count";
+        count.textContent = String(countValue);
+        summary.appendChild(count);
+
+        wrapper.appendChild(summary);
+        return wrapper;
+    }
+
     function appendMessageContent(container, message) {
         if (message.role === "assistant" && !message.variant) {
             renderMarkdownContent(container, message.content);
@@ -2378,9 +2642,9 @@
         }
     }
 
-    function buildTypingIndicator(progressSteps) {
+    function buildTypingIndicator(progressSteps, sessionId) {
         const article = document.createElement("article");
-        article.className = "message message--assistant";
+        article.className = "message message--assistant message--activity";
 
         const header = document.createElement("div");
         header.className = "message__header";
@@ -2391,17 +2655,20 @@
 
         const timestamp = document.createElement("span");
         timestamp.className = "message__timestamp";
-        timestamp.textContent = "Working";
+        timestamp.textContent = formatLiveWorkedLabel(sessionId, progressSteps);
+        timestamp.dataset.progressSessionId = normalizeSessionValue(sessionId) || "";
 
         header.append(role, timestamp);
         article.appendChild(header);
 
         const content = document.createElement("div");
-        content.className = "message__content";
+        content.className = "message__content message__activity-content";
 
         const steps = Array.isArray(progressSteps) ? progressSteps : [];
         if (steps.length > 0) {
-            content.appendChild(buildLiveActivityList(steps));
+            const visibleSteps = visibleProgressSteps(steps);
+            content.appendChild(buildLiveActivityHeadline(visibleSteps));
+            content.appendChild(buildLiveActivityList(visibleSteps));
         } else {
             const dots = document.createElement("div");
             dots.className = "typing-indicator";
@@ -2411,6 +2678,29 @@
         article.appendChild(content);
 
         return article;
+    }
+
+    function buildLiveActivityHeadline(steps) {
+        const activeStep = activeProgressStep(steps);
+        const headline = document.createElement("div");
+        headline.className = "live-activity-headline";
+
+        const label = document.createElement("p");
+        label.className = "live-activity-headline__label";
+        label.textContent = activeStep
+            ? cleanProgressText(activeStep.label) || cleanProgressText(activeStep.id) || "Working"
+            : "Finishing response";
+        headline.appendChild(label);
+
+        const summary = activeStep ? cleanProgressText(activeStep.summary) : "";
+        if (summary) {
+            const detail = document.createElement("p");
+            detail.className = "live-activity-headline__summary";
+            detail.textContent = summary;
+            headline.appendChild(detail);
+        }
+
+        return headline;
     }
 
     function buildLiveActivityList(steps) {
@@ -2439,6 +2729,14 @@
                 item.appendChild(summaryElement);
             }
 
+            const tokenUsage = resolveTokenUsage(step);
+            if (tokenUsage) {
+                const tokenElement = document.createElement("span");
+                tokenElement.className = "live-activity-list__summary live-activity-list__summary--tokens";
+                tokenElement.textContent = formatTokenBreakdown(tokenUsage);
+                item.appendChild(tokenElement);
+            }
+
             list.appendChild(item);
         });
 
@@ -2452,16 +2750,23 @@
             return;
         }
 
+        ensureSessionProgressStarted(targetSessionId);
         const currentSteps = sessionProgress(targetSessionId);
         const nextSteps = currentSteps.slice();
         const existingIndex = nextSteps.findIndex(function (currentStep) {
             return currentStep.id === progressStep.id;
         });
+        const now = Date.now();
+        const existingStep = existingIndex >= 0 ? nextSteps[existingIndex] : null;
+        const nextStep = Object.assign({}, progressStep, {
+            startedAt: existingStep && Number.isFinite(existingStep.startedAt) ? existingStep.startedAt : now,
+            updatedAt: now
+        });
 
         if (existingIndex >= 0) {
-            nextSteps[existingIndex] = progressStep;
+            nextSteps[existingIndex] = nextStep;
         } else {
-            nextSteps.push(progressStep);
+            nextSteps.push(nextStep);
         }
 
         state.pendingProgressBySession[targetSessionId] = nextSteps;
@@ -2478,6 +2783,8 @@
         }
 
         delete state.pendingProgressBySession[targetSessionId];
+        delete state.pendingProgressStartedAtBySession[targetSessionId];
+        syncProgressClock();
     }
 
     function sessionProgress(sessionId) {
@@ -2488,6 +2795,82 @@
 
         const steps = state.pendingProgressBySession[targetSessionId];
         return Array.isArray(steps) ? steps : [];
+    }
+
+    function assistantActivitySteps(sessionId, fallbackSteps) {
+        const progressSteps = visibleProgressSteps(snapshotSessionProgress(sessionId));
+        const fallbackActivitySteps = executionStepsToActivitySteps(fallbackSteps);
+        if (progressSteps.length > 0) {
+            return mergeActivitySteps(progressSteps, fallbackActivitySteps);
+        }
+
+        return fallbackActivitySteps;
+    }
+
+    function mergeActivitySteps(activitySteps, fallbackSteps) {
+        const fallbackById = new Map();
+        fallbackSteps.forEach(function (step) {
+            if (step && step.id) {
+                fallbackById.set(step.id, step);
+            }
+        });
+
+        const seen = new Set();
+        const merged = activitySteps.map(function (step) {
+            const fallback = fallbackById.get(step.id);
+            seen.add(step.id);
+            if (!fallback) {
+                return step;
+            }
+
+            return Object.assign({}, fallback, step, {
+                tokenUsage: resolveTokenUsage(step) || resolveTokenUsage(fallback),
+                dataAccesses: resolveDataAccesses(step).length > 0
+                    ? resolveDataAccesses(step)
+                    : resolveDataAccesses(fallback)
+            });
+        });
+
+        fallbackSteps.forEach(function (step) {
+            if (step && step.id && !seen.has(step.id)) {
+                merged.push(step);
+            }
+        });
+        return merged;
+    }
+
+    function executionStepsToActivitySteps(executionSteps) {
+        if (!Array.isArray(executionSteps)) {
+            return [];
+        }
+
+        return executionSteps.map(function (step) {
+            return normalizeProgressStep({
+                id: step && step.id,
+                label: step && step.label,
+                kind: step && step.kind,
+                status: "completed",
+                summary: step && step.summary,
+                durationMs: step && step.durationMs,
+                tokenUsage: step && step.tokenUsage,
+                dataAccesses: step && step.dataAccesses
+            });
+        }).filter(Boolean);
+    }
+
+    function snapshotSessionProgress(sessionId) {
+        return sessionProgress(sessionId).map(function (step) {
+            return {
+                id: step.id,
+                label: step.label,
+                kind: step.kind,
+                status: step.status,
+                summary: step.summary,
+                durationMs: step.durationMs,
+                tokenUsage: step.tokenUsage,
+                dataAccesses: resolveDataAccesses(step)
+            };
+        });
     }
 
     function normalizeProgressStep(step) {
@@ -2506,7 +2889,9 @@
             kind: cleanProgressText(step.kind),
             status: normalizeProgressStatus(step.status),
             summary: cleanProgressText(step.summary),
-            durationMs: Number.isFinite(step.durationMs) ? step.durationMs : null
+            durationMs: Number.isFinite(step.durationMs) ? step.durationMs : null,
+            tokenUsage: resolveTokenUsage(step),
+            dataAccesses: resolveDataAccesses(step)
         };
     }
 
@@ -2522,6 +2907,28 @@
         return "running";
     }
 
+    function activeProgressStep(steps) {
+        const progressSteps = visibleProgressSteps(steps);
+        return progressSteps.reduce(function (latestStep, step) {
+            if (!latestStep) {
+                return step;
+            }
+
+            const latestUpdatedAt = Number.isFinite(latestStep.updatedAt) ? latestStep.updatedAt : 0;
+            const stepUpdatedAt = Number.isFinite(step.updatedAt) ? step.updatedAt : 0;
+            return stepUpdatedAt >= latestUpdatedAt ? step : latestStep;
+        }, null);
+    }
+
+    function visibleProgressSteps(steps) {
+        const progressSteps = Array.isArray(steps) ? steps : [];
+        const detailedSteps = progressSteps.filter(function (step) {
+            return step && step.id !== "REQUEST_ANALYSIS";
+        });
+
+        return detailedSteps.length > 0 ? detailedSteps : progressSteps;
+    }
+
     function formatLiveActivityMeta(step) {
         const parts = [];
         if (step.kind) {
@@ -2530,6 +2937,10 @@
         parts.push(step.status === "completed" ? "done" : step.status);
         if (step.durationMs != null) {
             parts.push(formatDuration(step.durationMs));
+        }
+        const tokenUsage = resolveTokenUsage(step);
+        if (tokenUsage) {
+            parts.push(formatTokenBadge(tokenUsage));
         }
         return parts.join(" ");
     }
@@ -2542,6 +2953,7 @@
 
         if (isLoading) {
             state.pendingSessions[targetSessionId] = true;
+            ensureSessionProgressStarted(targetSessionId);
             if (targetSessionId === state.sessionId) {
                 setStatus("Analyzing");
             }
@@ -2563,6 +2975,37 @@
         elements.questionInput.disabled = state.loading;
         elements.logoutButton.disabled = hasPendingSessions();
         elements.sendButton.textContent = state.loading ? "Sending..." : "Send";
+        syncProgressClock();
+    }
+
+    function ensureSessionProgressStarted(sessionId) {
+        const targetSessionId = normalizeSessionValue(sessionId);
+        if (!targetSessionId) {
+            return;
+        }
+
+        if (!Number.isFinite(state.pendingProgressStartedAtBySession[targetSessionId])) {
+            state.pendingProgressStartedAtBySession[targetSessionId] = Date.now();
+        }
+        syncProgressClock();
+    }
+
+    function syncProgressClock() {
+        if (state.loading && !state.progressClock) {
+            state.progressClock = window.setInterval(function () {
+                const timestamp = elements.messages.querySelector("[data-progress-session-id]");
+                if (state.loading && timestamp) {
+                    const sessionId = timestamp.dataset.progressSessionId;
+                    timestamp.textContent = formatLiveWorkedLabel(sessionId, sessionProgress(sessionId));
+                }
+            }, 1000);
+            return;
+        }
+
+        if (!state.loading && state.progressClock) {
+            window.clearInterval(state.progressClock);
+            state.progressClock = null;
+        }
     }
 
     function isSessionPending(sessionId) {
@@ -2637,10 +3080,26 @@
             return "";
         }
 
-        return new Intl.DateTimeFormat(undefined, {
+        const today = new Date();
+        const options = {
             hour: "numeric",
             minute: "2-digit"
-        }).format(parsed);
+        };
+        if (!isSameLocalDate(parsed, today)) {
+            options.month = "short";
+            options.day = "numeric";
+            if (parsed.getFullYear() !== today.getFullYear()) {
+                options.year = "numeric";
+            }
+        }
+
+        return new Intl.DateTimeFormat(undefined, options).format(parsed);
+    }
+
+    function isSameLocalDate(left, right) {
+        return left.getFullYear() === right.getFullYear()
+            && left.getMonth() === right.getMonth()
+            && left.getDate() === right.getDate();
     }
 
     function normalizeSessionList(sessions) {
@@ -2657,12 +3116,21 @@
             }
         }
         if (Array.isArray(sessions)) {
-            for (const sessionId of sessions) {
-                addSessionId(sessionId);
+            for (const session of sessions) {
+                addSession(session);
             }
         }
 
         return normalized;
+
+        function addSession(session) {
+            const sessionId = sessionIdFromSessionListItem(session);
+            const createdAt = sessionCreatedAtFromSessionListItem(session);
+            if (createdAt) {
+                storeSessionLabel(sessionId, createdAt);
+            }
+            addSessionId(sessionId);
+        }
 
         function addSessionId(sessionId) {
             const value = typeof sessionId === "string" ? sessionId.trim() : "";
@@ -2673,6 +3141,26 @@
             seen.add(value);
             normalized.push(value);
         }
+    }
+
+    function sessionIdFromSessionListItem(session) {
+        if (typeof session === "string") {
+            return normalizeSessionValue(session);
+        }
+
+        if (!session || typeof session !== "object") {
+            return "";
+        }
+
+        return normalizeSessionValue(session.sessionId);
+    }
+
+    function sessionCreatedAtFromSessionListItem(session) {
+        if (!session || typeof session !== "object") {
+            return "";
+        }
+
+        return normalizeTimestamp(session.createdAt) || normalizeTimestamp(session.timestamp);
     }
 
     function normalizeSessionValue(sessionId) {
@@ -2688,6 +3176,21 @@
         return messages.map(function (message) {
             const role = message && message.role === "user" ? "user" : "assistant";
             const content = message && typeof message.content === "string" ? message.content.trim() : "";
+            const timestamp = normalizeTimestamp(message && message.timestamp)
+                || normalizeTimestamp(message && message.createdAt)
+                || loadedAt;
+            const executionSteps = Array.isArray(message && message.executionSteps)
+                ? message.executionSteps
+                : [];
+            const responseTimeMs = role === "assistant"
+                ? normalizeResponseTimeMs(message && message.responseTimeMs)
+                    ?? normalizeResponseTimeMs(message && message.durationMs)
+                    ?? normalizeResponseTimeMs(message && message.elapsedMs)
+                    ?? sumStepDurations(executionSteps)
+                : null;
+            const tokenUsage = role === "assistant"
+                ? normalizeTokenUsage(message && message.tokenUsage) || sumStepTokenUsage(executionSteps)
+                : null;
             if (!content) {
                 return null;
             }
@@ -2695,9 +3198,26 @@
             return {
                 role: role,
                 content: content,
-                timestamp: loadedAt
+                timestamp: timestamp,
+                tokenUsage: tokenUsage,
+                responseTimeMs: responseTimeMs,
+                executionSteps: executionSteps,
+                activitySteps: role === "assistant" ? executionStepsToActivitySteps(executionSteps) : []
             };
         }).filter(Boolean);
+    }
+
+    function normalizeTimestamp(value) {
+        if (typeof value !== "string" || !value.trim()) {
+            return "";
+        }
+
+        const parsed = new Date(value);
+        if (Number.isNaN(parsed.getTime())) {
+            return "";
+        }
+
+        return parsed.toISOString();
     }
 
     function normalizeMemories(memories) {
@@ -2914,6 +3434,18 @@
         return labels[sessionId];
     }
 
+    function storeSessionLabel(sessionId, createdAt) {
+        const targetSessionId = normalizeSessionValue(sessionId);
+        const timestamp = normalizeTimestamp(createdAt);
+        if (!targetSessionId || !timestamp) {
+            return;
+        }
+
+        const labels = readSessionLabels();
+        labels[targetSessionId] = formatSessionTimestamp(timestamp);
+        writeSessionLabels(labels);
+    }
+
     function removeSessionLabel(sessionId) {
         const labels = readSessionLabels();
         if (!Object.prototype.hasOwnProperty.call(labels, sessionId)) {
@@ -2986,6 +3518,65 @@
         }
 
         return (durationMs / 1000).toFixed(durationMs >= 10_000 ? 0 : 1) + " s";
+    }
+
+    function formatTimeSpentBadge(durationMs) {
+        if (!Number.isFinite(durationMs) || durationMs < 0) {
+            return "";
+        }
+
+        const roundedMs = Math.round(durationMs);
+        if (roundedMs < 1000) {
+            return roundedMs + " ms";
+        }
+
+        const totalSeconds = Math.max(1, Math.round(roundedMs / 1000));
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+        if (minutes > 0) {
+            return minutes + "m " + seconds + "s";
+        }
+
+        return totalSeconds + "s";
+    }
+
+    function formatWorkedLabel(durationMs, verb) {
+        const labelVerb = verb || "Worked";
+        if (!Number.isFinite(durationMs) || durationMs < 0) {
+            return labelVerb;
+        }
+
+        const totalSeconds = Math.max(0, Math.floor(durationMs / 1000));
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+
+        if (minutes > 0) {
+            return labelVerb + " for " + minutes + "m " + seconds + "s";
+        }
+
+        return labelVerb + " for " + seconds + "s";
+    }
+
+    function formatWorkSummaryLabel(durationMs, tokenUsage, verb) {
+        const parts = [formatWorkedLabel(durationMs, verb)];
+        const resolvedTokenUsage = resolveTokenUsage(tokenUsage);
+        if (resolvedTokenUsage) {
+            parts.push(formatTokenBadge(resolvedTokenUsage));
+        }
+        return parts.join(" · ");
+    }
+
+    function formatLiveWorkedLabel(sessionId, steps) {
+        const targetSessionId = normalizeSessionValue(sessionId);
+        const startedAt = targetSessionId ? state.pendingProgressStartedAtBySession[targetSessionId] : null;
+        const tokenUsage = sumStepTokenUsage(visibleProgressSteps(
+                Array.isArray(steps) ? steps : sessionProgress(targetSessionId)
+        ));
+        if (!Number.isFinite(startedAt)) {
+            return formatWorkSummaryLabel(null, tokenUsage, "Working");
+        }
+
+        return formatWorkSummaryLabel(Date.now() - startedAt, tokenUsage, "Working");
     }
 
     function formatDataAccessBadge(dataAccesses) {
@@ -3128,6 +3719,32 @@
         }
 
         return null;
+    }
+
+    function resolveMessageResponseTime(message) {
+        if (!message || typeof message !== "object") {
+            return null;
+        }
+
+        const explicitResponseTime = normalizeResponseTimeMs(message.responseTimeMs)
+            ?? normalizeResponseTimeMs(message.durationMs)
+            ?? normalizeResponseTimeMs(message.elapsedMs);
+        if (explicitResponseTime != null) {
+            return explicitResponseTime;
+        }
+
+        return sumStepDurations(
+            Array.isArray(message.activitySteps) && message.activitySteps.length > 0
+                ? message.activitySteps
+                : Array.isArray(message.executionSteps)
+                    ? message.executionSteps
+                    : []
+        );
+    }
+
+    function normalizeResponseTimeMs(value) {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
     }
 
     function resolveDataAccesses(step) {

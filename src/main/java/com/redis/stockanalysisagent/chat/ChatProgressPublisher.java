@@ -1,5 +1,6 @@
 package com.redis.stockanalysisagent.chat;
 
+import com.redis.stockanalysisagent.agent.TokenUsageSummary;
 import com.redis.stockanalysisagent.cache.ExternalDataAccess;
 import org.springframework.stereotype.Component;
 
@@ -40,9 +41,32 @@ public class ChatProgressPublisher {
             String kind,
             long durationMs,
             String summary,
+            TokenUsageSummary tokenUsage
+    ) {
+        emit(step(id, label, kind, STATUS_COMPLETED, durationMs, summary, tokenUsage, List.of()));
+    }
+
+    public void completed(
+            String id,
+            String label,
+            String kind,
+            long durationMs,
+            String summary,
             List<ExternalDataAccess> dataAccesses
     ) {
         emit(step(id, label, kind, STATUS_COMPLETED, durationMs, summary, null, dataAccesses));
+    }
+
+    public void completed(
+            String id,
+            String label,
+            String kind,
+            long durationMs,
+            String summary,
+            TokenUsageSummary tokenUsage,
+            List<ExternalDataAccess> dataAccesses
+    ) {
+        emit(step(id, label, kind, STATUS_COMPLETED, durationMs, summary, tokenUsage, dataAccesses));
     }
 
     public void failed(String id, String label, String kind, long durationMs, String summary) {
@@ -56,10 +80,10 @@ public class ChatProgressPublisher {
             String status,
             Long durationMs,
             String summary,
-            Integer loop,
+            TokenUsageSummary tokenUsage,
             List<ExternalDataAccess> dataAccesses
     ) {
-        return new ChatProgressStep(id, label, kind, status, durationMs, summary, loop, dataAccesses);
+        return new ChatProgressStep(id, label, kind, status, durationMs, summary, tokenUsage, null, dataAccesses);
     }
 
     private void emit(ChatProgressStep step) {
