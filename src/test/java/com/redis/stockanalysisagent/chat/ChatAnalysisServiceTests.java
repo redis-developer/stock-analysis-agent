@@ -166,6 +166,48 @@ class ChatAnalysisServiceTests {
     }
 
     @Test
+    void includesBacktestExecutionsInTriggeredAgents() {
+        CoordinatorResponse coordinatorResponse = new CoordinatorResponse();
+        coordinatorResponse.setFinishReason(CoordinatorResponse.FinishReason.COMPLETED);
+        coordinatorResponse.setFinalResponse("Backtest complete.");
+        coordinatorResponse.setResolvedTicker("AAPL");
+        coordinatorResponse.setSelectedAgents(List.of(AgentType.BACKTEST));
+        CoordinatorAgent.CoordinationResult coordinationResult = new CoordinatorAgent.CoordinationResult(
+                coordinatorResponse,
+                List.of(new AgentExecution(
+                        AgentType.BACKTEST,
+                        "AAPL",
+                        "Ran SMA crossover backtest.",
+                        20,
+                        null
+                )),
+                null,
+                false,
+                false,
+                null,
+                0,
+                0,
+                false
+        );
+        when(coordinatorAgent.execute("Backtest AAPL", "alice:session-1", 4, true, "cache-key"))
+                .thenReturn(coordinationResult);
+
+        ChatAnalysisService.AnalysisTurn analysisTurn = chatAnalysisService.analyze(
+                "Backtest AAPL",
+                "alice:session-1",
+                4,
+                true,
+                "cache-key"
+        );
+
+        assertThat(analysisTurn.triggeredAgents()).containsExactly("BACKTEST");
+        assertThat(analysisTurn.executionSteps())
+                .filteredOn(step -> "BACKTEST:AAPL".equals(step.id()))
+                .singleElement()
+                .satisfies(step -> assertThat(step.summary()).isEqualTo("Ran SMA crossover backtest."));
+    }
+
+    @Test
     void semanticCacheStepShowsDisabledPreference() {
         CoordinatorResponse coordinatorResponse = new CoordinatorResponse();
         coordinatorResponse.setFinishReason(CoordinatorResponse.FinishReason.COMPLETED);

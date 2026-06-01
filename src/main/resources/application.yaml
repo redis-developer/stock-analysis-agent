@@ -62,6 +62,10 @@ stock-analysis:
     sma-period: 20
     ema-period: 20
     rsi-period: 14
+  historical-candles:
+    provider: twelve-data
+    interval: 1day
+    adjustment: all
   sec:
     data-base-url: https://data.sec.gov
     ticker-file-url: https://www.sec.gov/files/company_tickers.json

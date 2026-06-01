@@ -3,6 +3,8 @@ package com.redis.stockanalysisagent.agent.coordinator;
 import com.redis.stockanalysisagent.agent.AgentExecution;
 import com.redis.stockanalysisagent.agent.AgentType;
 import com.redis.stockanalysisagent.agent.TokenUsageSummary;
+import com.redis.stockanalysisagent.agent.backtest.BacktestAgent;
+import com.redis.stockanalysisagent.agent.backtest.BacktestResult;
 import com.redis.stockanalysisagent.agent.fundamentals.FundamentalsAgent;
 import com.redis.stockanalysisagent.agent.fundamentals.FundamentalsResult;
 import com.redis.stockanalysisagent.agent.marketdata.MarketDataAgent;
@@ -39,6 +41,7 @@ public class CoordinatorAgentTools {
     private final FundamentalsAgent fundamentalsAgent;
     private final NewsAgent newsAgent;
     private final TechnicalAnalysisAgent technicalAnalysisAgent;
+    private final BacktestAgent backtestAgent;
     private final SynthesisAgent synthesisAgent;
     private final ExternalDataCache externalDataCache;
     private final ChatProgressPublisher progressPublisher;
@@ -49,6 +52,7 @@ public class CoordinatorAgentTools {
             FundamentalsAgent fundamentalsAgent,
             NewsAgent newsAgent,
             TechnicalAnalysisAgent technicalAnalysisAgent,
+            BacktestAgent backtestAgent,
             SynthesisAgent synthesisAgent,
             ExternalDataCache externalDataCache,
             ChatProgressPublisher progressPublisher
@@ -57,6 +61,7 @@ public class CoordinatorAgentTools {
         this.fundamentalsAgent = fundamentalsAgent;
         this.newsAgent = newsAgent;
         this.technicalAnalysisAgent = technicalAnalysisAgent;
+        this.backtestAgent = backtestAgent;
         this.synthesisAgent = synthesisAgent;
         this.externalDataCache = externalDataCache;
         this.progressPublisher = progressPublisher;
@@ -261,6 +266,50 @@ public class CoordinatorAgentTools {
         }
     }
 
+    @Tool(description = "Run the Backtest Agent for one ticker and return a historical technical signal backtest.")
+    public AgentToolResult runBacktestAgent(
+            @ToolParam(description = "The stock ticker symbol in uppercase, for example AAPL.")
+            String ticker,
+            @ToolParam(description = "The user's backtest question, including date range and strategy rule.")
+            String question
+    ) {
+        String normalizedTicker = normalizeTicker(ticker);
+        externalDataCache.clearRecordedAccesses();
+        long startedAt = System.nanoTime();
+        progressPublisher.running(
+                agentStepId(AgentType.BACKTEST, normalizedTicker),
+                agentProgressLabel(AgentType.BACKTEST, normalizedTicker),
+                ChatProgressPublisher.KIND_AGENT,
+                "Triggering the backtest agent."
+        );
+        try {
+            BacktestResult result = backtestAgent.execute(normalizedTicker, question);
+            List<ExternalDataAccess> accesses = externalDataCache.drainRecordedAccesses();
+            trace().record(execution(
+                    AgentType.BACKTEST,
+                    normalizedTicker,
+                    result.getMessage(),
+                    startedAt,
+                    result.getTokenUsage(),
+                    accesses
+            ));
+            progressPublisher.completed(
+                    agentStepId(AgentType.BACKTEST, normalizedTicker),
+                    agentProgressLabel(AgentType.BACKTEST, normalizedTicker),
+                    ChatProgressPublisher.KIND_AGENT,
+                    elapsedDurationMs(startedAt),
+                    result.getMessage(),
+                    result.getTokenUsage(),
+                    accesses
+            );
+            return AgentToolResult.completed(result.getMessage(), result.getFinalResponse());
+        } catch (RuntimeException ex) {
+            return errorResult(AgentType.BACKTEST, normalizedTicker, startedAt, ex);
+        } finally {
+            externalDataCache.clearRecordedAccesses();
+        }
+    }
+
     @Tool(description = "Run the Synthesis Agent only after specialist tools have produced enough evidence for a full analysis, comparison, outlook, risk review, or mixed-signal answer.")
     public AgentToolResult runSynthesisAgent(
             @ToolParam(description = "Comma-separated stock ticker symbols in uppercase, for example AAPL or AAPL,MSFT.")
@@ -420,6 +469,7 @@ public class CoordinatorAgentTools {
             case FUNDAMENTALS -> "Fundamentals agent";
             case NEWS -> "News agent";
             case TECHNICAL_ANALYSIS -> "Technical analysis agent";
+            case BACKTEST -> "Backtest agent";
             case SYNTHESIS -> "Synthesis agent";
         };
 

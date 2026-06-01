@@ -5,5 +5,6 @@ public enum AgentType {
     FUNDAMENTALS,
     NEWS,
     TECHNICAL_ANALYSIS,
+    BACKTEST,
     SYNTHESIS
 }

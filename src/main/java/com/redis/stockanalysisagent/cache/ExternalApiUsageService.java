@@ -49,7 +49,8 @@ public class ExternalApiUsageService {
             case CacheNames.SEC_TICKER_INDEX, CacheNames.SEC_COMPANY_FACTS, CacheNames.SEC_SUBMISSIONS ->
                     Optional.of(SEC);
             case CacheNames.TAVILY_NEWS_SEARCH -> Optional.of(TAVILY);
-            case CacheNames.MARKET_DATA_QUOTES, CacheNames.TECHNICAL_ANALYSIS_SNAPSHOTS -> Optional.of(TWELVE_DATA);
+            case CacheNames.MARKET_DATA_QUOTES, CacheNames.TECHNICAL_ANALYSIS_SNAPSHOTS,
+                 CacheNames.HISTORICAL_CANDLES -> Optional.of(TWELVE_DATA);
             default -> Optional.empty();
         };
     }

@@ -2,6 +2,8 @@ package com.redis.stockanalysisagent.agent.coordinator;
 
 import com.redis.stockanalysisagent.agent.AgentExecution;
 import com.redis.stockanalysisagent.agent.AgentType;
+import com.redis.stockanalysisagent.agent.backtest.BacktestAgent;
+import com.redis.stockanalysisagent.agent.backtest.BacktestResult;
 import com.redis.stockanalysisagent.agent.fundamentals.FundamentalsAgent;
 import com.redis.stockanalysisagent.agent.fundamentals.FundamentalsResult;
 import com.redis.stockanalysisagent.agent.marketdata.MarketDataAgent;
@@ -13,6 +15,7 @@ import com.redis.stockanalysisagent.agent.synthesis.SynthesisEvidence;
 import com.redis.stockanalysisagent.agent.synthesis.SynthesisResult;
 import com.redis.stockanalysisagent.agent.technicalanalysis.TechnicalAnalysisAgent;
 import com.redis.stockanalysisagent.agent.technicalanalysis.TechnicalAnalysisResult;
+import com.redis.stockanalysisagent.backtest.BacktestReport;
 import com.redis.stockanalysisagent.cache.ExternalDataCache;
 import com.redis.stockanalysisagent.chat.ChatProgressPublisher;
 import com.redis.stockanalysisagent.stock.FundamentalsSnapshot;
@@ -41,6 +44,7 @@ class CoordinatorAgentToolsTests {
     private final FundamentalsAgent fundamentalsAgent = mock(FundamentalsAgent.class);
     private final NewsAgent newsAgent = mock(NewsAgent.class);
     private final TechnicalAnalysisAgent technicalAnalysisAgent = mock(TechnicalAnalysisAgent.class);
+    private final BacktestAgent backtestAgent = mock(BacktestAgent.class);
     private final SynthesisAgent synthesisAgent = mock(SynthesisAgent.class);
     private final ExternalDataCache externalDataCache = mock(ExternalDataCache.class);
     private final ChatProgressPublisher progressPublisher = mock(ChatProgressPublisher.class);
@@ -49,6 +53,7 @@ class CoordinatorAgentToolsTests {
             fundamentalsAgent,
             newsAgent,
             technicalAnalysisAgent,
+            backtestAgent,
             synthesisAgent,
             externalDataCache,
             progressPublisher
@@ -97,6 +102,35 @@ class CoordinatorAgentToolsTests {
                             AgentType.SYNTHESIS
                     );
             verify(synthesisAgent).execute(eq(question), eq(List.of("AAPL")), argThat(this::containsAppleEvidence));
+        } finally {
+            tools.clearTrace();
+        }
+    }
+
+    @Test
+    void runBacktestAgentNormalizesTickerAndRecordsExecution() {
+        BacktestReport report = backtestReport();
+        when(externalDataCache.drainRecordedAccesses()).thenReturn(List.of());
+        when(backtestAgent.execute("AAPL", "Backtest AAPL from 2025 to 2026."))
+                .thenReturn(BacktestResult.completed("Backtest complete.", report));
+
+        tools.startTrace();
+        try {
+            CoordinatorAgentTools.AgentToolResult result = tools.runBacktestAgent(
+                    "aapl",
+                    "Backtest AAPL from 2025 to 2026."
+            );
+
+            assertThat(result.status()).isEqualTo("COMPLETED");
+            assertThat(result.finalResponse()).isSameAs(report);
+            assertThat(tools.drainExecutions())
+                    .singleElement()
+                    .satisfies(execution -> {
+                        assertThat(execution.agentType()).isEqualTo(AgentType.BACKTEST);
+                        assertThat(execution.ticker()).isEqualTo("AAPL");
+                        assertThat(execution.summary()).isEqualTo("Backtest complete.");
+                    });
+            verify(backtestAgent).execute("AAPL", "Backtest AAPL from 2025 to 2026.");
         } finally {
             tools.clearTrace();
         }
@@ -198,6 +232,26 @@ class CoordinatorAgentToolsTests {
                 "BULLISH",
                 "OVERBOUGHT",
                 "twelve-data"
+        );
+    }
+
+    private BacktestReport backtestReport() {
+        return new BacktestReport(
+                "AAPL",
+                "SMA crossover 20/50",
+                "1day",
+                "all",
+                LocalDate.parse("2025-01-01"),
+                LocalDate.parse("2025-12-31"),
+                BigDecimal.valueOf(10_000),
+                BigDecimal.valueOf(11_000),
+                BigDecimal.valueOf(10),
+                BigDecimal.valueOf(15),
+                BigDecimal.valueOf(8),
+                252,
+                2,
+                "Adjusted daily candles.",
+                List.of()
         );
     }
 }

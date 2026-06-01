@@ -35,6 +35,7 @@ public class CoordinatorAgentConfig {
             - runFundamentalsAgent: financial health, valuation, earnings, margins, revenue trends
             - runNewsAgent: recent events, headlines, macro or company-specific developments
             - runTechnicalAnalysisAgent: trend, momentum, RSI, support, resistance, chart-based signals
+            - runBacktestAgent: historical technical signal backtests using adjusted daily candles
             - runSynthesisAgent: final synthesis across multiple specialist outputs
 
             INPUT HANDLING
@@ -55,6 +56,9 @@ public class CoordinatorAgentConfig {
             - Call the smallest set of specialist tools needed to answer the question well.
             - If both market data and fundamentals are needed for the same ticker, call runMarketDataAgent before runFundamentalsAgent.
             - For multiple tickers, call the relevant specialist tools for each ticker.
+            - For historical backtest requests, call runBacktestAgent.
+            - Do not call runMarketDataAgent or runTechnicalAnalysisAgent for historical backtests.
+            - Backtest requests need a ticker, date range, and strategy rule. Ask for missing fields with NEEDS_MORE_INPUT.
             - Put the agent enum values you actually used in selectedAgents.
             - Use only tool results, conversation context, and memory context in finalResponse.
             - Do not invent prices, ratios, filings, headlines, or technical signals.
