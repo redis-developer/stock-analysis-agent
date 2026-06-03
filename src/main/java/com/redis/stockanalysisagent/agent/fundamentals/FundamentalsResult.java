@@ -5,12 +5,6 @@ import com.redis.stockanalysisagent.stock.FundamentalsSnapshot;
 
 public class FundamentalsResult {
 
-    public enum FinishReason {
-        COMPLETED,
-        ERROR
-    }
-
-    private FinishReason finishReason;
     private String message;
     private FundamentalsSnapshot finalResponse;
     private TokenUsageSummary tokenUsage;
@@ -18,8 +12,7 @@ public class FundamentalsResult {
     public FundamentalsResult() {
     }
 
-    public FundamentalsResult(FinishReason finishReason, String message, FundamentalsSnapshot finalResponse) {
-        this.finishReason = finishReason;
+    public FundamentalsResult(String message, FundamentalsSnapshot finalResponse) {
         this.message = message;
         this.finalResponse = finalResponse;
     }
@@ -29,19 +22,11 @@ public class FundamentalsResult {
     }
 
     public static FundamentalsResult completed(String message, FundamentalsSnapshot finalResponse) {
-        return new FundamentalsResult(FinishReason.COMPLETED, message, finalResponse);
+        return new FundamentalsResult(message, finalResponse);
     }
 
     public static FundamentalsResult error(String message) {
-        return new FundamentalsResult(FinishReason.ERROR, message, null);
-    }
-
-    public FinishReason getFinishReason() {
-        return finishReason;
-    }
-
-    public void setFinishReason(FinishReason finishReason) {
-        this.finishReason = finishReason;
+        return new FundamentalsResult(message, null);
     }
 
     public String getMessage() {

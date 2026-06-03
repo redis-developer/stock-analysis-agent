@@ -4,12 +4,6 @@ import com.redis.stockanalysisagent.agent.TokenUsageSummary;
 
 public class SynthesisResult {
 
-    public enum FinishReason {
-        COMPLETED,
-        ERROR
-    }
-
-    private FinishReason finishReason;
     private String message;
     private String finalResponse;
     private TokenUsageSummary tokenUsage;
@@ -17,26 +11,17 @@ public class SynthesisResult {
     public SynthesisResult() {
     }
 
-    public SynthesisResult(FinishReason finishReason, String message, String finalResponse) {
-        this.finishReason = finishReason;
+    public SynthesisResult(String message, String finalResponse) {
         this.message = message;
         this.finalResponse = finalResponse;
     }
 
     public static SynthesisResult completed(String message, String finalResponse) {
-        return new SynthesisResult(FinishReason.COMPLETED, message, finalResponse);
+        return new SynthesisResult(message, finalResponse);
     }
 
     public static SynthesisResult error(String message) {
-        return new SynthesisResult(FinishReason.ERROR, message, null);
-    }
-
-    public FinishReason getFinishReason() {
-        return finishReason;
-    }
-
-    public void setFinishReason(FinishReason finishReason) {
-        this.finishReason = finishReason;
+        return new SynthesisResult(message, null);
     }
 
     public String getMessage() {

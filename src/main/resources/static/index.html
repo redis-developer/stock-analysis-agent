@@ -4,13 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Stock Analysis Agent</title>
-    <link rel="stylesheet" href="chat.css?v=20260601-memory-tabs">
+    <link rel="stylesheet" href="chat.css?v=20260602-redis-logo-compact">
 </head>
 <body>
 <section id="login-screen" class="login-screen" aria-label="Login">
     <form id="login-form" class="login-card" novalidate>
         <div class="brand login-brand">
-            <span class="brand-mark" aria-hidden="true"></span>
+            <picture class="brand-logo">
+                <source media="(max-width: 640px)" srcset="assets/redis-mark.svg">
+                <img src="assets/redis-logo.svg" alt="Redis">
+            </picture>
             <div class="brand-copy">
                 <h1>Stock Analysis Agent</h1>
             </div>
@@ -36,6 +39,12 @@
 
 <main id="chat-app" class="chat-app" hidden>
     <aside id="session-sidebar" class="session-sidebar" aria-label="Saved sessions">
+        <div class="session-sidebar__logo">
+            <picture class="brand-logo">
+                <source media="(max-width: 640px)" srcset="assets/redis-mark.svg">
+                <img src="assets/redis-logo.svg" alt="Redis">
+            </picture>
+        </div>
         <div class="session-sidebar__header">
             <div>
                 <p class="session-sidebar__eyebrow">Memory</p>
@@ -156,7 +165,10 @@
                 </svg>
             </button>
             <div class="brand">
-                <span class="brand-mark" aria-hidden="true"></span>
+                <picture class="brand-logo">
+                    <source media="(max-width: 640px)" srcset="assets/redis-mark.svg">
+                    <img src="assets/redis-logo.svg" alt="Redis">
+                </picture>
                 <div class="brand-copy">
                     <h1>Stock Analysis Agent</h1>
                 </div>

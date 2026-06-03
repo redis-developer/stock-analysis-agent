@@ -310,7 +310,7 @@ public class ChatSessionService {
 
         try {
             JsonNode root = OBJECT_MAPPER.readTree(trimmed);
-            return root.get("finishReason") != null && root.get("finalResponse") != null;
+            return root.get("response") != null || root.get("finalResponse") != null || root.get("nextPrompt") != null;
         } catch (Exception ignored) {
             return false;
         }

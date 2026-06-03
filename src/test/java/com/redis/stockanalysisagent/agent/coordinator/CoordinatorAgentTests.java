@@ -27,8 +27,7 @@ class CoordinatorAgentTests {
     void executeAllowsCoordinatorOnlyResponse() {
         SemanticAnalysisCache semanticAnalysisCache = mock(SemanticAnalysisCache.class);
         CoordinatorResponse coordinatorResponse = new CoordinatorResponse();
-        coordinatorResponse.setFinishReason(CoordinatorResponse.FinishReason.COMPLETED);
-        coordinatorResponse.setFinalResponse("You own AAPL.");
+        coordinatorResponse.setResponse("You own AAPL.");
         coordinatorResponse.setResolvedQuestion("What stocks do I own?");
         coordinatorResponse.setSelectedAgents(List.of());
         coordinatorResponse.setReasoning("Memory contains one owned ticker.");
@@ -40,7 +39,7 @@ class CoordinatorAgentTests {
         )
                 .execute("What stocks do I own?", "alice:session-1", 4, true, "cache-key");
 
-        assertThat(result.coordinatorResponse().getFinalResponse()).isEqualTo("You own AAPL.");
+        assertThat(result.coordinatorResponse().getResponse()).isEqualTo("You own AAPL.");
         assertThat(result.agentExecutions()).isEmpty();
         assertThat(result.semanticCacheStored()).isFalse();
         verifyNoInteractions(semanticAnalysisCache);
@@ -57,8 +56,7 @@ class CoordinatorAgentTests {
                 null
         );
         CoordinatorResponse coordinatorResponse = new CoordinatorResponse();
-        coordinatorResponse.setFinishReason(CoordinatorResponse.FinishReason.COMPLETED);
-        coordinatorResponse.setFinalResponse("AAPL is trading at 123.");
+        coordinatorResponse.setResponse("AAPL is trading at 123.");
         coordinatorResponse.setResolvedTicker("AAPL");
         coordinatorResponse.setSelectedAgents(List.of(AgentType.MARKET_DATA));
 
@@ -69,7 +67,7 @@ class CoordinatorAgentTests {
         )
                 .execute("What is the current price?", "alice:session-1", 4, true, "cache-key");
 
-        assertThat(result.coordinatorResponse().getFinalResponse()).isEqualTo("AAPL is trading at 123.");
+        assertThat(result.coordinatorResponse().getResponse()).isEqualTo("AAPL is trading at 123.");
         assertThat(result.agentExecutions()).containsExactly(execution);
         assertThat(result.semanticCacheStored()).isTrue();
         verify(semanticAnalysisCache).storeFinalResponse("cache-key", "AAPL is trading at 123.");
@@ -86,8 +84,7 @@ class CoordinatorAgentTests {
                 null
         );
         CoordinatorResponse coordinatorResponse = new CoordinatorResponse();
-        coordinatorResponse.setFinishReason(CoordinatorResponse.FinishReason.COMPLETED);
-        coordinatorResponse.setFinalResponse("AAPL is trading at 123.");
+        coordinatorResponse.setResponse("AAPL is trading at 123.");
         coordinatorResponse.setResolvedTicker("AAPL");
         coordinatorResponse.setSelectedAgents(List.of(AgentType.MARKET_DATA));
 

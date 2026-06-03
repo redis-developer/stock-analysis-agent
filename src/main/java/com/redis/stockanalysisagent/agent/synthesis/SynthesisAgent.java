@@ -30,8 +30,7 @@ public class SynthesisAgent {
         SynthesisResult entity = response.entity();
         if (entity == null
                 || entity.getFinalResponse() == null
-                || entity.getFinalResponse().isBlank()
-                || entity.getFinishReason() != SynthesisResult.FinishReason.COMPLETED) {
+                || entity.getFinalResponse().isBlank()) {
             throw new IllegalStateException("Synthesis Agent returned an invalid response.");
         }
 

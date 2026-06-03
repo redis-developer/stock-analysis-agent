@@ -27,8 +27,7 @@ class ChatAnalysisServiceTests {
     @Test
     void completedResponseWithNoSpecialistWorkReturnsCoordinatorResponse() {
         CoordinatorResponse coordinatorResponse = new CoordinatorResponse();
-        coordinatorResponse.setFinishReason(CoordinatorResponse.FinishReason.COMPLETED);
-        coordinatorResponse.setFinalResponse("You own AAPL.");
+        coordinatorResponse.setResponse("You own AAPL.");
         coordinatorResponse.setResolvedQuestion("What stocks do I own?");
         coordinatorResponse.setSelectedAgents(List.of());
         coordinatorResponse.setReasoning("Memory contains one owned ticker.");
@@ -74,8 +73,7 @@ class ChatAnalysisServiceTests {
     @Test
     void includesExternalDataAccessesOnSpecialistExecutionSteps() {
         CoordinatorResponse coordinatorResponse = new CoordinatorResponse();
-        coordinatorResponse.setFinishReason(CoordinatorResponse.FinishReason.COMPLETED);
-        coordinatorResponse.setFinalResponse("AAPL is trading at 123.");
+        coordinatorResponse.setResponse("AAPL is trading at 123.");
         coordinatorResponse.setResolvedTicker("AAPL");
         coordinatorResponse.setResolvedQuestion("What is the current price?");
         coordinatorResponse.setSelectedAgents(List.of(AgentType.MARKET_DATA));
@@ -131,8 +129,7 @@ class ChatAnalysisServiceTests {
     @Test
     void capturesResolvedTickersAndTriggeredAgents() {
         CoordinatorResponse coordinatorResponse = new CoordinatorResponse();
-        coordinatorResponse.setFinishReason(CoordinatorResponse.FinishReason.COMPLETED);
-        coordinatorResponse.setFinalResponse("AAPL and MSFT were analyzed.");
+        coordinatorResponse.setResponse("AAPL and MSFT were analyzed.");
         coordinatorResponse.setResolvedTickers(List.of("AAPL", "MSFT"));
         coordinatorResponse.setSelectedAgents(List.of(AgentType.MARKET_DATA, AgentType.NEWS, AgentType.SYNTHESIS));
         CoordinatorAgent.CoordinationResult coordinationResult = new CoordinatorAgent.CoordinationResult(
@@ -168,8 +165,7 @@ class ChatAnalysisServiceTests {
     @Test
     void includesBacktestExecutionsInTriggeredAgents() {
         CoordinatorResponse coordinatorResponse = new CoordinatorResponse();
-        coordinatorResponse.setFinishReason(CoordinatorResponse.FinishReason.COMPLETED);
-        coordinatorResponse.setFinalResponse("Backtest complete.");
+        coordinatorResponse.setResponse("Backtest complete.");
         coordinatorResponse.setResolvedTicker("AAPL");
         coordinatorResponse.setSelectedAgents(List.of(AgentType.BACKTEST));
         CoordinatorAgent.CoordinationResult coordinationResult = new CoordinatorAgent.CoordinationResult(
@@ -210,8 +206,7 @@ class ChatAnalysisServiceTests {
     @Test
     void semanticCacheStepShowsDisabledPreference() {
         CoordinatorResponse coordinatorResponse = new CoordinatorResponse();
-        coordinatorResponse.setFinishReason(CoordinatorResponse.FinishReason.COMPLETED);
-        coordinatorResponse.setFinalResponse("AAPL is trading at 123.");
+        coordinatorResponse.setResponse("AAPL is trading at 123.");
         CoordinatorAgent.CoordinationResult coordinationResult = new CoordinatorAgent.CoordinationResult(
                 coordinatorResponse,
                 List.of(),

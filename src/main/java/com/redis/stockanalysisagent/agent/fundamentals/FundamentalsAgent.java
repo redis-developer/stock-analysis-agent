@@ -36,7 +36,7 @@ public class FundamentalsAgent {
         TokenUsageSummary tokenUsage = TokenUsageSummary.from(response.response());
 
         FundamentalsResult entity = response.entity();
-        if (entity == null || entity.getFinalResponse() == null || entity.getFinishReason() != FundamentalsResult.FinishReason.COMPLETED) {
+        if (entity == null || entity.getFinalResponse() == null) {
             throw new IllegalStateException("Fundamentals Agent returned an invalid response.");
         }
         entity.setTokenUsage(tokenUsage);

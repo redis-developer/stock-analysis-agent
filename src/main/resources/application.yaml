@@ -76,7 +76,7 @@ stock-analysis:
       url: ${STOCK_ANALYSIS_AGENT_LANGCACHE_ENDPOINT}
       cache-id: ${STOCK_ANALYSIS_AGENT_LANGCACHE_CACHE_ID}
       api-key: ${STOCK_ANALYSIS_AGENT_LANGCACHE_API_KEY}
-      similarity-threshold: ${LANGCACHE_SIMILARITY_THRESHOLD:0.9}
+      similarity-threshold: ${LANGCACHE_SIMILARITY_TH3RESHOLD:0.9}
       exact-search: ${LANGCACHE_EXACT_SEARCH:true}
       semantic-search: ${LANGCACHE_SEMANTIC_SEARCH:true}
       include-kind-attribute: ${LANGCACHE_INCLUDE_KIND_ATTRIBUTE:false}

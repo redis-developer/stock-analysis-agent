@@ -35,7 +35,6 @@ class BacktestAgentTests {
                 "Backtest AAPL from 2020-01-01 to 2025-12-31 using a 20 day and 50 day moving average crossover strategy."
         );
 
-        assertThat(result.getFinishReason()).isEqualTo(BacktestResult.FinishReason.COMPLETED);
         assertThat(result.getFinalResponse()).isSameAs(report);
         assertThat(result.getMessage()).contains("SMA crossover 20/50 on AAPL returned 12.3%");
         verify(backtestTools).runSmaCrossoverBacktest(

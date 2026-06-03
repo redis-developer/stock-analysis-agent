@@ -5,12 +5,6 @@ import com.redis.stockanalysisagent.stock.NewsSnapshot;
 
 public class NewsResult {
 
-    public enum FinishReason {
-        COMPLETED,
-        ERROR
-    }
-
-    private FinishReason finishReason;
     private String message;
     private NewsSnapshot finalResponse;
     private TokenUsageSummary tokenUsage;
@@ -18,8 +12,7 @@ public class NewsResult {
     public NewsResult() {
     }
 
-    public NewsResult(FinishReason finishReason, String message, NewsSnapshot finalResponse) {
-        this.finishReason = finishReason;
+    public NewsResult(String message, NewsSnapshot finalResponse) {
         this.message = message;
         this.finalResponse = finalResponse;
     }
@@ -29,19 +22,11 @@ public class NewsResult {
     }
 
     public static NewsResult completed(String message, NewsSnapshot finalResponse) {
-        return new NewsResult(FinishReason.COMPLETED, message, finalResponse);
+        return new NewsResult(message, finalResponse);
     }
 
     public static NewsResult error(String message) {
-        return new NewsResult(FinishReason.ERROR, message, null);
-    }
-
-    public FinishReason getFinishReason() {
-        return finishReason;
-    }
-
-    public void setFinishReason(FinishReason finishReason) {
-        this.finishReason = finishReason;
+        return new NewsResult(message, null);
     }
 
     public String getMessage() {

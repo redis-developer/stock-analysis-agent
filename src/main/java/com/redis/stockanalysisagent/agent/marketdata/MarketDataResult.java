@@ -5,13 +5,6 @@ import com.redis.stockanalysisagent.stock.MarketSnapshot;
 
 public class MarketDataResult {
 
-    public enum FinishReason {
-        COMPLETED,
-        NEEDS_MORE_INPUT,
-        ERROR
-    }
-
-    private FinishReason finishReason;
     private String message;
     private MarketSnapshot finalResponse;
     private TokenUsageSummary tokenUsage;
@@ -19,8 +12,7 @@ public class MarketDataResult {
     public MarketDataResult() {
     }
 
-    public MarketDataResult(FinishReason finishReason, String message, MarketSnapshot finalResponse) {
-        this.finishReason = finishReason;
+    public MarketDataResult(String message, MarketSnapshot finalResponse) {
         this.message = message;
         this.finalResponse = finalResponse;
     }
@@ -30,19 +22,11 @@ public class MarketDataResult {
     }
 
     public static MarketDataResult completed(String message, MarketSnapshot finalResponse) {
-        return new MarketDataResult(FinishReason.COMPLETED, message, finalResponse);
+        return new MarketDataResult(message, finalResponse);
     }
 
     public static MarketDataResult error(String message) {
-        return new MarketDataResult(FinishReason.ERROR, message, null);
-    }
-
-    public FinishReason getFinishReason() {
-        return finishReason;
-    }
-
-    public void setFinishReason(FinishReason finishReason) {
-        this.finishReason = finishReason;
+        return new MarketDataResult(message, null);
     }
 
     public String getMessage() {

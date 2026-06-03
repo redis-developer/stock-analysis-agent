@@ -76,8 +76,8 @@ public class CoordinatorAgent {
                 throw new IllegalStateException("Coordinator returned no response.");
             }
 
-            if (coordinatorResponse.getFinishReason() == CoordinatorResponse.FinishReason.NEEDS_MORE_INPUT) {
-                coordinatorResponse.setConversationId(conversationId);
+            if (!hasText(coordinatorResponse.getResponse())) {
+                throw new IllegalStateException("Coordinator returned an invalid response.");
             }
 
             ChatResponse chatResponse = response.response();
@@ -155,6 +155,10 @@ public class CoordinatorAgent {
         return message == null || message.isBlank() ? ex.getClass().getSimpleName() : message;
     }
 
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
+    }
+
     private long elapsedDurationMs(long startedAt) {
         return Math.max(0, (System.nanoTime() - startedAt) / 1_000_000);
     }
@@ -191,8 +195,8 @@ public class CoordinatorAgent {
             return false;
         }
 
-        String finalResponse = coordinatorResponse.getFinalResponse();
-        if (finalResponse == null || finalResponse.isBlank()) {
+        String response = coordinatorResponse.getResponse();
+        if (response == null || response.isBlank()) {
             return false;
         }
 
@@ -204,7 +208,7 @@ public class CoordinatorAgent {
                 "Storing the final answer in the semantic cache."
         );
         try {
-            semanticAnalysisCache.storeFinalResponse(semanticCacheKey.trim(), finalResponse.trim());
+            semanticAnalysisCache.storeFinalResponse(semanticCacheKey.trim(), response.trim());
             progressPublisher.completed(
                     "SEMANTIC_CACHE_STORE",
                     "Semantic cache store",

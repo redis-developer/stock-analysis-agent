@@ -8,17 +8,7 @@ import java.util.Objects;
 
 public class CoordinatorResponse {
 
-    public enum FinishReason {
-        NEEDS_MORE_INPUT,
-        DIRECT_RESPONSE,
-        COMPLETED,
-        CANNOT_PROCEED,
-        OUT_OF_SCOPE
-    }
-
-    private FinishReason finishReason;
-    private String nextPrompt;
-    private String finalResponse;
+    private String response;
     private String conversationId;
     private String resolvedTicker;
     private List<String> resolvedTickers = new ArrayList<>();
@@ -30,45 +20,25 @@ public class CoordinatorResponse {
     }
 
     public CoordinatorResponse(
-            FinishReason finishReason,
-            String nextPrompt,
-            String finalResponse,
+            String response,
             String resolvedTicker,
             String resolvedQuestion,
             List<AgentType> selectedAgents,
             String reasoning
     ) {
-        this.finishReason = finishReason;
-        this.nextPrompt = nextPrompt;
-        this.finalResponse = finalResponse;
+        this.response = response;
         setResolvedTicker(resolvedTicker);
         this.resolvedQuestion = resolvedQuestion;
         this.selectedAgents = selectedAgents == null ? new ArrayList<>() : selectedAgents;
         this.reasoning = reasoning;
     }
 
-    public FinishReason getFinishReason() {
-        return finishReason;
+    public String getResponse() {
+        return response;
     }
 
-    public void setFinishReason(FinishReason finishReason) {
-        this.finishReason = finishReason;
-    }
-
-    public String getNextPrompt() {
-        return nextPrompt;
-    }
-
-    public void setNextPrompt(String nextPrompt) {
-        this.nextPrompt = nextPrompt;
-    }
-
-    public String getFinalResponse() {
-        return finalResponse;
-    }
-
-    public void setFinalResponse(String finalResponse) {
-        this.finalResponse = finalResponse;
+    public void setResponse(String response) {
+        this.response = response;
     }
 
     public String getConversationId() {

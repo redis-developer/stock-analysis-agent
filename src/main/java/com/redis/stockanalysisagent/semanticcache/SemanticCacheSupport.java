@@ -118,6 +118,11 @@ final class SemanticCacheSupport {
                 String value = finalResponse.asText().trim();
                 return value.isEmpty() ? null : value;
             }
+            JsonNode responseNode = root.get("response");
+            if (responseNode != null && responseNode.isTextual()) {
+                String value = responseNode.asText().trim();
+                return value.isEmpty() ? null : value;
+            }
         } catch (Exception ignored) {
         }
 
@@ -127,7 +132,7 @@ final class SemanticCacheSupport {
     static String toCoordinatorPayload(String finalResponse) {
         StringBuilder escapedFinalResponse = new StringBuilder();
         JSON_STRING_ENCODER.quoteAsString(finalResponse == null ? "" : finalResponse, escapedFinalResponse);
-        return "{\"finishReason\":\"DIRECT_RESPONSE\",\"finalResponse\":\"%s\"}".formatted(escapedFinalResponse);
+        return "{\"response\":\"%s\"}".formatted(escapedFinalResponse);
     }
 
     private static ChatResponse toCoordinatorChatResponse(String finalResponse, long durationMs) {

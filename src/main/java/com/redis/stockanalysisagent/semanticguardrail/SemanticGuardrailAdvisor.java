@@ -159,7 +159,7 @@ public class SemanticGuardrailAdvisor implements CallAdvisor {
     private String toCoordinatorPayload(String finalResponse) {
         StringBuilder escapedFinalResponse = new StringBuilder();
         JSON_STRING_ENCODER.quoteAsString(finalResponse == null ? "" : finalResponse, escapedFinalResponse);
-        return "{\"finishReason\":\"DIRECT_RESPONSE\",\"finalResponse\":\"%s\"}".formatted(escapedFinalResponse);
+        return "{\"response\":\"%s\"}".formatted(escapedFinalResponse);
     }
 
     private long elapsedDurationMs(long startedAt) {

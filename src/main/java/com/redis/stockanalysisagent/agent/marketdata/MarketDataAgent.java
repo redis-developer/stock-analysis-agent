@@ -25,7 +25,7 @@ public class MarketDataAgent {
         TokenUsageSummary tokenUsage = TokenUsageSummary.from(response.response());
 
         MarketDataResult entity = response.entity();
-        if (entity == null || entity.getFinalResponse() == null || entity.getFinishReason() != MarketDataResult.FinishReason.COMPLETED) {
+        if (entity == null || entity.getFinalResponse() == null) {
             throw new IllegalStateException("Market Data Agent returned an invalid response.");
         }
 

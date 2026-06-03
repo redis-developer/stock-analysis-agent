@@ -27,10 +27,9 @@ public class BacktestAgentConfig {
             Refuse or error when the requested strategy requires intraday sequencing.
             Return valid JSON matching the requested schema.
 
-            COMPLETION
-            Return finishReason = COMPLETED when finalResponse is available.
-            Return finishReason = NEEDS_MORE_INPUT when ticker, date range, or strategy rule is missing.
-            Return finishReason = ERROR only when the task cannot be completed.
+            OUTPUT
+            finalResponse must contain the backtest report when the request can be completed.
+            message must state the strategy rule and assumptions in plain prose.
             """;
 
     @Bean("backtestChatClient")

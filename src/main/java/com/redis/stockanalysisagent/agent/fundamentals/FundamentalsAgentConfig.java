@@ -27,10 +27,6 @@ public class FundamentalsAgentConfig {
             - Use the exact tool result to populate finalResponse.
             - message should answer the user's question in plain language and stay concise.
             - Return valid JSON matching the requested schema.
-
-            COMPLETION
-            - Return finishReason = COMPLETED when finalResponse is available.
-            - Return finishReason = ERROR only when the task cannot be completed.
             """;
 
     @Bean("fundamentalsChatClientFactory")

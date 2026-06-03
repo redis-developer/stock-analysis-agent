@@ -28,7 +28,6 @@ public class SynthesisAgentConfig {
             OUTPUT
             finalResponse should be a structured analysis with short labeled sections when the user asked for a full analysis.
             message should be one concise sentence summarizing what was synthesized.
-            finishReason must be COMPLETED when finalResponse is available.
             """;
 
     @Bean("synthesisChatClient")

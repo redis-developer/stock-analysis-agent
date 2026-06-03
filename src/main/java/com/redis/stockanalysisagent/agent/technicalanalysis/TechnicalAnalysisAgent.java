@@ -25,7 +25,7 @@ public class TechnicalAnalysisAgent {
         TokenUsageSummary tokenUsage = TokenUsageSummary.from(response.response());
 
         TechnicalAnalysisResult entity = response.entity();
-        if (entity == null || entity.getFinalResponse() == null || entity.getFinishReason() != TechnicalAnalysisResult.FinishReason.COMPLETED) {
+        if (entity == null || entity.getFinalResponse() == null) {
             throw new IllegalStateException("Technical Analysis Agent returned an invalid response.");
         }
         entity.setTokenUsage(tokenUsage);

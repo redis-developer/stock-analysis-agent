@@ -26,7 +26,7 @@ class ChatSessionServiceTests {
         when(memoryRepository.findMemoryMessagesByConversationId("alice:session-1")).thenReturn(List.of(
                 message("user", "Dont you have access to my memories?", "2026-05-26T10:00:00Z"),
                 message("assistant", """
-                        {"conversationId":"unknown","finalResponse":"I can access stock related memory.","finishReason":"DIRECT_RESPONSE","selectedAgents":[]}
+                        {"conversationId":"unknown","response":"I can access stock related memory.","selectedAgents":[]}
                         """, "2026-05-26T10:00:01Z"),
                 message("assistant", "I can access stock related memory.", "2026-05-26T10:00:02Z")
         ));

@@ -5,12 +5,6 @@ import com.redis.stockanalysisagent.stock.TechnicalAnalysisSnapshot;
 
 public class TechnicalAnalysisResult {
 
-    public enum FinishReason {
-        COMPLETED,
-        ERROR
-    }
-
-    private FinishReason finishReason;
     private String message;
     private TechnicalAnalysisSnapshot finalResponse;
     private TokenUsageSummary tokenUsage;
@@ -19,11 +13,9 @@ public class TechnicalAnalysisResult {
     }
 
     public TechnicalAnalysisResult(
-            FinishReason finishReason,
             String message,
             TechnicalAnalysisSnapshot finalResponse
     ) {
-        this.finishReason = finishReason;
         this.message = message;
         this.finalResponse = finalResponse;
     }
@@ -33,19 +25,11 @@ public class TechnicalAnalysisResult {
     }
 
     public static TechnicalAnalysisResult completed(String message, TechnicalAnalysisSnapshot finalResponse) {
-        return new TechnicalAnalysisResult(FinishReason.COMPLETED, message, finalResponse);
+        return new TechnicalAnalysisResult(message, finalResponse);
     }
 
     public static TechnicalAnalysisResult error(String message) {
-        return new TechnicalAnalysisResult(FinishReason.ERROR, message, null);
-    }
-
-    public FinishReason getFinishReason() {
-        return finishReason;
-    }
-
-    public void setFinishReason(FinishReason finishReason) {
-        this.finishReason = finishReason;
+        return new TechnicalAnalysisResult(message, null);
     }
 
     public String getMessage() {

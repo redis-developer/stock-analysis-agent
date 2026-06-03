@@ -47,7 +47,7 @@ public class BacktestAgent {
         if (entity == null) {
             throw new IllegalStateException("Backtest Agent returned no response.");
         }
-        if (entity.getFinishReason() != BacktestResult.FinishReason.COMPLETED || entity.getFinalResponse() == null) {
+        if (entity.getFinalResponse() == null) {
             throw new IllegalStateException(entity.getMessage() == null || entity.getMessage().isBlank()
                     ? "Backtest Agent returned an invalid response."
                     : entity.getMessage());

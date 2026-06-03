@@ -41,26 +41,24 @@ public class CoordinatorAgentConfig {
             INPUT HANDLING
             - The user may provide a complete stock-analysis request, an incomplete request, or an unsupported request.
             - The user may also send a conversational follow-up, ownership update, preference, correction, or acknowledgement that does not require specialist analysis.
-            - If the request is missing information required to proceed, return finishReason = NEEDS_MORE_INPUT.
-            - Use nextPrompt for one short, specific follow-up question.
-            - If the user message can be answered directly without running specialist tools, return finishReason = DIRECT_RESPONSE.
-            - When finishReason = DIRECT_RESPONSE, set finalResponse to one short, natural reply and leave selectedAgents empty.
-            - If the request is outside the capabilities of this stock-analysis agent, return finishReason = OUT_OF_SCOPE.
-            - If the request cannot be fulfilled even after clarification, return finishReason = CANNOT_PROCEED.
-            - Return finishReason = COMPLETED only after you have called the needed specialist tools and written the answer.
+            - If the request is missing information required to proceed, set response to one short, specific follow-up question and leave selectedAgents empty.
+            - If the user message can be answered directly without running specialist tools, set response to one short, natural reply and leave selectedAgents empty.
+            - If the request is outside the capabilities of this stock-analysis agent, set response to one concise explanation and leave selectedAgents empty.
+            - If the request cannot be fulfilled even after clarification, set response to one concise explanation and leave selectedAgents empty.
+            - When fresh stock data is needed, call the needed specialist tools before setting response.
 
-            COMPLETED RULES
-            - When finishReason = COMPLETED, set resolvedTickers to every stock ticker required by the request, in uppercase.
+            RESPONSE RULES
+            - When response answers a stock-analysis request, set resolvedTickers to every stock ticker required by the request, in uppercase.
             - Keep resolvedTicker populated with the first ticker only for backward compatibility.
-            - When finishReason = COMPLETED, set resolvedQuestion to the user's final stock-analysis question.
+            - When response answers a stock-analysis request, set resolvedQuestion to the user's final stock-analysis question.
             - Call the smallest set of specialist tools needed to answer the question well.
             - If both market data and fundamentals are needed for the same ticker, call runMarketDataAgent before runFundamentalsAgent.
             - For multiple tickers, call the relevant specialist tools for each ticker.
             - For historical backtest requests, call runBacktestAgent.
             - Do not call runMarketDataAgent or runTechnicalAnalysisAgent for historical backtests.
-            - Backtest requests need a ticker, date range, and strategy rule. Ask for missing fields with NEEDS_MORE_INPUT.
+            - Backtest requests need a ticker, date range, and strategy rule. Ask for missing fields through response.
             - Put the agent enum values you actually used in selectedAgents.
-            - Use only tool results, conversation context, and memory context in finalResponse.
+            - Use only tool results, conversation context, and memory context in response.
             - Do not invent prices, ratios, filings, headlines, or technical signals.
 
             SYNTHESIS RULES
@@ -68,7 +66,7 @@ public class CoordinatorAgentConfig {
             - Call runSynthesisAgent for full analysis, deep analysis, multi-ticker comparisons, investment outlook, risk review, or when the answer needs to reconcile fundamentals, news, technicals, and market data.
             - For a full analysis of one ticker, call runMarketDataAgent, runFundamentalsAgent, runNewsAgent, runTechnicalAnalysisAgent, then runSynthesisAgent.
             - For simple quote, one metric, one filing, one headline, or one technical signal, do not call runSynthesisAgent.
-            - If runSynthesisAgent is called successfully, base finalResponse on its returned finalResponse.
+            - If runSynthesisAgent is called successfully, base response on its returned finalResponse.
 
             CLARIFICATION GUIDANCE
             - Before asking for a ticker, inspect the current message, conversation history, and BACKGROUND_MEMORY for a single clear stock or holding.
@@ -104,8 +102,7 @@ public class CoordinatorAgentConfig {
 
             OUTPUT
             Return valid JSON that matches the requested schema.
-            For COMPLETED and DIRECT_RESPONSE, finalResponse must contain the user-facing answer.
-            For NEEDS_MORE_INPUT, nextPrompt must contain the user-facing follow-up question.
+            response must contain the user-facing answer or follow-up question for this turn.
             """;
 
     @Bean("coordinatorChatClient")
@@ -159,7 +156,7 @@ public class CoordinatorAgentConfig {
 
         try {
             JsonNode root = OBJECT_MAPPER.readTree(trimmed);
-            return root.get("finishReason") != null && root.get("finalResponse") != null;
+            return root.get("response") != null || root.get("finalResponse") != null || root.get("nextPrompt") != null;
         } catch (Exception ignored) {
             return false;
         }

@@ -5,13 +5,6 @@ import com.redis.stockanalysisagent.backtest.BacktestReport;
 
 public class BacktestResult {
 
-    public enum FinishReason {
-        COMPLETED,
-        NEEDS_MORE_INPUT,
-        ERROR
-    }
-
-    private FinishReason finishReason;
     private String message;
     private BacktestReport finalResponse;
     private TokenUsageSummary tokenUsage;
@@ -20,29 +13,19 @@ public class BacktestResult {
     }
 
     public BacktestResult(
-            FinishReason finishReason,
             String message,
             BacktestReport finalResponse
     ) {
-        this.finishReason = finishReason;
         this.message = message;
         this.finalResponse = finalResponse;
     }
 
     public static BacktestResult completed(String message, BacktestReport finalResponse) {
-        return new BacktestResult(FinishReason.COMPLETED, message, finalResponse);
+        return new BacktestResult(message, finalResponse);
     }
 
     public static BacktestResult error(String message) {
-        return new BacktestResult(FinishReason.ERROR, message, null);
-    }
-
-    public FinishReason getFinishReason() {
-        return finishReason;
-    }
-
-    public void setFinishReason(FinishReason finishReason) {
-        this.finishReason = finishReason;
+        return new BacktestResult(message, null);
     }
 
     public String getMessage() {

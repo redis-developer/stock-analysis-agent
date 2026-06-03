@@ -22,10 +22,6 @@ public class MarketDataAgentConfig {
             - Use the exact tool result to populate finalResponse.
             - Keep message concise and directly useful to the user.
             - Return valid JSON matching the requested schema.
-
-            COMPLETION
-            - Return finishReason = COMPLETED when finalResponse is available.
-            - Return finishReason = ERROR only when the task cannot be completed.
             """;
 
     @Bean("marketDataChatClient")

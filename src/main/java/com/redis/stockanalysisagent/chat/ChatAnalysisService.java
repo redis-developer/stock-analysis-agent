@@ -94,12 +94,8 @@ class ChatAnalysisService {
     }
 
     private String resolveCoordinatorMessage(CoordinatorResponse coordinatorResponse) {
-        if (coordinatorResponse.getFinalResponse() != null && !coordinatorResponse.getFinalResponse().isBlank()) {
-            return coordinatorResponse.getFinalResponse();
-        }
-
-        if (coordinatorResponse.getNextPrompt() != null && !coordinatorResponse.getNextPrompt().isBlank()) {
-            return coordinatorResponse.getNextPrompt();
+        if (coordinatorResponse.getResponse() != null && !coordinatorResponse.getResponse().isBlank()) {
+            return coordinatorResponse.getResponse();
         }
 
         return "I could not complete the stock-analysis request.";
@@ -325,24 +321,27 @@ class ChatAnalysisService {
     }
 
     private String coordinatorSummary(CoordinatorResponse coordinatorResponse, List<AgentExecution> agentExecutions) {
-        return switch (coordinatorResponse.getFinishReason()) {
-            case COMPLETED -> {
-                String ticker = coordinatorResponse.getResolvedTickers() == null || coordinatorResponse.getResolvedTickers().isEmpty()
-                        ? coordinatorResponse.getResolvedTicker()
-                        : String.join(", ", coordinatorResponse.getResolvedTickers());
-                String reasoning = coordinatorResponse.getReasoning();
-                String baseSummary = ticker == null
-                        ? "Completed the coordinator response."
-                        : agentExecutions == null || agentExecutions.isEmpty()
-                        ? "Resolved %s and answered directly.".formatted(ticker.toUpperCase())
-                        : "Resolved %s and called specialist tools.".formatted(ticker.toUpperCase());
+        String ticker = coordinatorResponse.getResolvedTickers() == null || coordinatorResponse.getResolvedTickers().isEmpty()
+                ? coordinatorResponse.getResolvedTicker()
+                : String.join(", ", coordinatorResponse.getResolvedTickers());
+        String reasoning = coordinatorResponse.getReasoning();
+        boolean hasAgentExecutions = agentExecutions != null && !agentExecutions.isEmpty();
+        String baseSummary;
+        if (hasText(ticker)) {
+            baseSummary = hasAgentExecutions
+                    ? "Resolved %s and called specialist tools.".formatted(ticker.toUpperCase())
+                    : "Resolved %s and answered directly.".formatted(ticker.toUpperCase());
+        } else if (hasText(coordinatorResponse.getResponse())) {
+            baseSummary = coordinatorResponse.getResponse();
+        } else {
+            baseSummary = "Completed the coordinator response.";
+        }
 
-                yield reasoning == null ? baseSummary : "%s Reasoning: %s".formatted(baseSummary, reasoning);
-            }
-            case DIRECT_RESPONSE -> coordinatorResponse.getFinalResponse();
-            case NEEDS_MORE_INPUT -> coordinatorResponse.getNextPrompt();
-            case OUT_OF_SCOPE, CANNOT_PROCEED -> coordinatorResponse.getFinalResponse();
-        };
+        return hasText(reasoning) ? "%s Reasoning: %s".formatted(baseSummary, reasoning) : baseSummary;
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 
     private long elapsedDurationMs(long startedAt) {

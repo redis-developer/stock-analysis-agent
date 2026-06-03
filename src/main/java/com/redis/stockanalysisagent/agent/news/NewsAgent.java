@@ -25,7 +25,7 @@ public class NewsAgent {
         TokenUsageSummary tokenUsage = TokenUsageSummary.from(response.response());
 
         NewsResult entity = response.entity();
-        if (entity == null || entity.getFinalResponse() == null || entity.getFinishReason() != NewsResult.FinishReason.COMPLETED) {
+        if (entity == null || entity.getFinalResponse() == null) {
             throw new IllegalStateException("News Agent returned an invalid response.");
         }
         entity.setTokenUsage(tokenUsage);
