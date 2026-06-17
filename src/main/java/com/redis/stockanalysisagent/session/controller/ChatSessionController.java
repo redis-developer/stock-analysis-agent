@@ -34,12 +34,33 @@ public class ChatSessionController {
     private final ChatSessionAccess sessionAccess;
     private final RateLimitStatusProvider rateLimitStatusProvider;
     private final ExternalApiUsageService apiUsageService;
+    private final LoginUserTrackingService loginUserTrackingService;
 
     public ChatSessionController(
             ChatSessionService chatSessionService,
             ChatSessionAccess sessionAccess
     ) {
-        this(chatSessionService, sessionAccess, (RateLimitStatusProvider) null, (ExternalApiUsageService) null);
+        this(
+                chatSessionService,
+                sessionAccess,
+                (RateLimitStatusProvider) null,
+                (ExternalApiUsageService) null,
+                null
+        );
+    }
+
+    public ChatSessionController(
+            ChatSessionService chatSessionService,
+            ChatSessionAccess sessionAccess,
+            LoginUserTrackingService loginUserTrackingService
+    ) {
+        this(
+                chatSessionService,
+                sessionAccess,
+                (RateLimitStatusProvider) null,
+                (ExternalApiUsageService) null,
+                loginUserTrackingService
+        );
     }
 
     @Autowired
@@ -47,13 +68,15 @@ public class ChatSessionController {
             ChatSessionService chatSessionService,
             ChatSessionAccess sessionAccess,
             ObjectProvider<RateLimitStatusProvider> rateLimitStatusProvider,
-            ObjectProvider<ExternalApiUsageService> apiUsageService
+            ObjectProvider<ExternalApiUsageService> apiUsageService,
+            ObjectProvider<LoginUserTrackingService> loginUserTrackingService
     ) {
         this(
                 chatSessionService,
                 sessionAccess,
                 rateLimitStatusProvider.getIfAvailable(),
-                apiUsageService.getIfAvailable()
+                apiUsageService.getIfAvailable(),
+                loginUserTrackingService.getIfAvailable()
         );
     }
 
@@ -61,12 +84,14 @@ public class ChatSessionController {
             ChatSessionService chatSessionService,
             ChatSessionAccess sessionAccess,
             RateLimitStatusProvider rateLimitStatusProvider,
-            ExternalApiUsageService apiUsageService
+            ExternalApiUsageService apiUsageService,
+            LoginUserTrackingService loginUserTrackingService
     ) {
         this.chatSessionService = chatSessionService;
         this.sessionAccess = sessionAccess;
         this.rateLimitStatusProvider = rateLimitStatusProvider;
         this.apiUsageService = apiUsageService;
+        this.loginUserTrackingService = loginUserTrackingService;
     }
 
     @PostMapping("/login")
@@ -76,6 +101,7 @@ public class ChatSessionController {
     ) {
         HttpSession session = httpRequest.getSession(true);
         String userId = sessionAccess.requireUserId(request.userId());
+        recordLogin(userId, httpRequest, session.getId());
         sessionAccess.storeUserId(session, userId);
         sessionAccess.storeRetrievedMemoriesLimit(
                 session,
@@ -233,6 +259,32 @@ public class ChatSessionController {
         }
 
         return apiUsageService.snapshot();
+    }
+
+    private void recordLogin(String userId, HttpServletRequest request, String sessionId) {
+        if (loginUserTrackingService != null) {
+            loginUserTrackingService.recordLogin(
+                    userId,
+                    clientIpAddress(request),
+                    request.getHeader("User-Agent"),
+                    request.getHeader("Accept-Language"),
+                    sessionId
+            );
+        }
+    }
+
+    private String clientIpAddress(HttpServletRequest request) {
+        String forwardedFor = request.getHeader("X-Forwarded-For");
+        if (forwardedFor != null && !forwardedFor.isBlank()) {
+            return forwardedFor.split(",")[0].trim();
+        }
+
+        String realIp = request.getHeader("X-Real-IP");
+        if (realIp != null && !realIp.isBlank()) {
+            return realIp.trim();
+        }
+
+        return request.getRemoteAddr();
     }
 
     private RateLimitStatus rateLimitStatus(HttpSession session) {

@@ -9,6 +9,7 @@ import com.redis.stockanalysisagent.session.dto.ChatSessionMetadata;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpSession;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
@@ -62,6 +63,31 @@ class ChatSessionControllerTests {
         assertThat(controller.context(request).getBody().apiCachingEnabled()).isFalse();
         assertThat(controller.context(request).getBody().semanticCachingEnabled()).isFalse();
         assertThat(controller.context(request).getBody().rateLimitingEnabled()).isFalse();
+    }
+
+    @Test
+    void loginRecordsNormalizedUserInRedisTracking() {
+        LoginUserTrackingService loginUserTrackingService = mock(LoginUserTrackingService.class);
+        ChatSessionController trackingController = new ChatSessionController(
+                chatSessionService,
+                new ChatSessionAccess(true),
+                loginUserTrackingService
+        );
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setSession(new MockHttpSession(null, "session-1"));
+        request.addHeader("X-Forwarded-For", "203.0.113.42, 10.0.0.1");
+        request.addHeader("User-Agent", "Mozilla/5.0");
+        request.addHeader("Accept-Language", "en-US,en;q=0.9");
+
+        trackingController.login(new LoginRequest(" alice ", 7, null, null, null), request);
+
+        verify(loginUserTrackingService).recordLogin(
+                "alice",
+                "203.0.113.42",
+                "Mozilla/5.0",
+                "en-US,en;q=0.9",
+                "session-1"
+        );
     }
 
     @Test
