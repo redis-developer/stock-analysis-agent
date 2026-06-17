@@ -108,12 +108,6 @@ Run it with the same environment variables listed above:
 docker run --rm -p 8080:8080 --env-file .env stock-analysis-agent
 ```
 
-## Cloud Run
-
-Use a Redis 8 compatible endpoint for the Redis settings.
-
-Use Cloud Build or build a `linux/amd64` image before deploying to Cloud Run.
-
 ## Docs
 
 More focused implementation notes are in these files:

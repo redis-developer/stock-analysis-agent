@@ -31,14 +31,6 @@ out/
 .env.*
 gha-creds-*.json
 
-### Terraform ###
-.terraform/
-*.tfstate
-*.tfstate.*
-*.tfvars
-*.tfvars.json
-crash.log
-
 ### NetBeans ###
 /nbproject/private/
 /nbbuild/
