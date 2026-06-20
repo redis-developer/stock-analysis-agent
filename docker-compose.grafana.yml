@@ -1,0 +1,21 @@
+services:
+  grafana:
+    build:
+      context: ./infra/grafana
+    image: stock-analysis-agent-grafana:local
+    container_name: stock-analysis-agent-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_PANELS_DISABLE_SANITIZE_HTML: "true"
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_SECURITY_ADMIN_USER: admin
+      STOCK_ANALYSIS_AGENT_APP_BASE_URL: ${STOCK_ANALYSIS_AGENT_APP_BASE_URL:-http://localhost:8080}
+      STOCK_ANALYSIS_AGENT_REDIS_HOST: ${STOCK_ANALYSIS_AGENT_REDIS_HOST:-host.docker.internal}
+      STOCK_ANALYSIS_AGENT_REDIS_PASSWORD: ${STOCK_ANALYSIS_AGENT_REDIS_PASSWORD:-}
+      STOCK_ANALYSIS_AGENT_REDIS_PORT: ${STOCK_ANALYSIS_AGENT_REDIS_PORT:-6379}
+      STOCK_ANALYSIS_AGENT_REDIS_USERNAME: ${STOCK_ANALYSIS_AGENT_REDIS_USERNAME:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

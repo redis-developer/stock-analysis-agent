@@ -1,0 +1,19 @@
+apiVersion: 1
+
+datasources:
+  - name: Redis
+    uid: redis
+    type: redis-datasource
+    access: proxy
+    isDefault: true
+    orgId: 1
+    url: redis://${STOCK_ANALYSIS_AGENT_REDIS_HOST}:${STOCK_ANALYSIS_AGENT_REDIS_PORT}
+    user: ${STOCK_ANALYSIS_AGENT_REDIS_USERNAME}
+    jsonData:
+      poolSize: 5
+      timeout: 10
+      pingInterval: 0
+      pipelineWindow: 0
+    secureJsonData:
+      password: ${STOCK_ANALYSIS_AGENT_REDIS_PASSWORD}
+    editable: true

@@ -54,12 +54,35 @@ class WorkflowServiceTests {
         assertThat(pipeline.fields()).doesNotContainKeys("finishedAt", "failureReason");
         assertThat(WorkflowService.sessionWorkflowsKey("session-1"))
                 .isEqualTo("stock-analysis:sessions:session-1:workflows");
+        assertThat(WorkflowService.userWorkflowsKey("alice"))
+                .isEqualTo("stock-analysis:users:alice:workflows");
+        assertThat(WorkflowService.userConversationsKey("alice"))
+                .isEqualTo("stock-analysis:users:alice:conversations");
+        assertThat(WorkflowService.conversationWorkflowsKey("alice:session-1"))
+                .isEqualTo("stock-analysis:conversations:alice:session-1:workflows");
         assertThat(pipeline.listPushes())
-                .containsExactly(new ListPush("stock-analysis:sessions:session-1:workflows", "workflow-1"));
+                .containsExactly(
+                        new ListPush("stock-analysis:sessions:session-1:workflows", "workflow-1"),
+                        new ListPush("stock-analysis:users:alice:workflows", "workflow-1"),
+                        new ListPush("stock-analysis:users:alice:conversations", "alice:session-1"),
+                        new ListPush("stock-analysis:conversations:alice:session-1:workflows", "workflow-1")
+                );
         verify(redisTemplate, times(2)).executePipelined(any(SessionCallback.class));
         verify(pipeline.operations()).expire(WorkflowService.workflowKey("workflow-1"), WorkflowService.workflowTtl());
         verify(pipeline.operations()).expire(
                 WorkflowService.sessionWorkflowsKey("session-1"),
+                WorkflowService.workflowTtl()
+        );
+        verify(pipeline.operations()).expire(
+                WorkflowService.userWorkflowsKey("alice"),
+                WorkflowService.workflowTtl()
+        );
+        verify(pipeline.operations()).expire(
+                WorkflowService.userConversationsKey("alice"),
+                WorkflowService.workflowTtl()
+        );
+        verify(pipeline.operations()).expire(
+                WorkflowService.conversationWorkflowsKey("alice:session-1"),
                 WorkflowService.workflowTtl()
         );
     }
@@ -147,6 +170,10 @@ class WorkflowServiceTests {
             listPushes.add(new ListPush(invocation.getArgument(0), invocation.getArgument(1)));
             return null;
         }).when(listOperations).rightPush(any(), any());
+        doAnswer(invocation -> {
+            listPushes.add(new ListPush(invocation.getArgument(0), invocation.getArgument(1)));
+            return null;
+        }).when(listOperations).leftPush(any(), any());
         return new PipelineCapture(operations, capturedFields, listPushes);
     }
 

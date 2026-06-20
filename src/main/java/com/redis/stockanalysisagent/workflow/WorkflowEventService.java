@@ -17,7 +17,7 @@ import java.util.Map;
 @Service
 public class WorkflowEventService {
 
-    private static final String EVENTS_SUFFIX = ":events";
+    static final String EVENTS_SUFFIX = ":events";
 
     private final StringRedisTemplate redisTemplate;
     private final Clock clock;

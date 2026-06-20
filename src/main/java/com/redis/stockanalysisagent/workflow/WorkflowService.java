@@ -1,7 +1,12 @@
 package com.redis.stockanalysisagent.workflow;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.dao.DataAccessException;
+import org.springframework.data.redis.connection.DataType;
 import org.springframework.data.redis.core.RedisOperations;
 import org.springframework.data.redis.core.SessionCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -13,15 +18,23 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
 
 @Service
 public class WorkflowService {
 
+    private static final Logger log = LoggerFactory.getLogger(WorkflowService.class);
+
     static final String KEY_PREFIX = "stock-analysis:workflows:";
     static final String SESSION_KEY_PREFIX = "stock-analysis:sessions:";
     static final String SESSION_WORKFLOWS_SUFFIX = ":workflows";
+    static final String USER_KEY_PREFIX = "stock-analysis:users:";
+    static final String USER_CONVERSATIONS_SUFFIX = ":conversations";
+    static final String USER_WORKFLOWS_SUFFIX = ":workflows";
+    static final String CONVERSATION_KEY_PREFIX = "stock-analysis:conversations:";
+    static final String CONVERSATION_WORKFLOWS_SUFFIX = ":workflows";
     static final Duration WORKFLOW_TTL = Duration.ofHours(24);
 
     private final StringRedisTemplate redisTemplate;
@@ -86,12 +99,57 @@ public class WorkflowService {
         writePipelined(metadata.workflowId(), fields);
     }
 
+    @EventListener(ApplicationReadyEvent.class)
+    void rebuildUserWorkflowIndexes() {
+        try {
+            Set<String> keys = redisTemplate.keys(KEY_PREFIX + "*");
+            if (keys == null || keys.isEmpty()) {
+                return;
+            }
+
+            for (String key : keys) {
+                if (key.endsWith(WorkflowEventService.EVENTS_SUFFIX)) {
+                    continue;
+                }
+                if (redisTemplate.type(key) != DataType.HASH) {
+                    continue;
+                }
+                String workflowId = key.substring(KEY_PREFIX.length());
+                Object userId = redisTemplate.opsForHash().get(key, "userId");
+                Object conversationId = redisTemplate.opsForHash().get(key, "conversationId");
+                if (userId instanceof String user && !user.isBlank()) {
+                    indexUserWorkflow(user, workflowId);
+                    if (conversationId instanceof String conversation && !conversation.isBlank()) {
+                        indexUserConversation(user, conversation);
+                    }
+                }
+                if (conversationId instanceof String conversation && !conversation.isBlank()) {
+                    indexConversationWorkflow(conversation, workflowId);
+                }
+            }
+        } catch (DataAccessException ex) {
+            log.warn("Skipped workflow user index rebuild: {}", ex.getMessage());
+        }
+    }
+
     static String workflowKey(String workflowId) {
         return KEY_PREFIX + workflowId;
     }
 
     static String sessionWorkflowsKey(String sessionId) {
         return SESSION_KEY_PREFIX + sessionId + SESSION_WORKFLOWS_SUFFIX;
+    }
+
+    static String userWorkflowsKey(String userId) {
+        return USER_KEY_PREFIX + userId + USER_WORKFLOWS_SUFFIX;
+    }
+
+    static String userConversationsKey(String userId) {
+        return USER_KEY_PREFIX + userId + USER_CONVERSATIONS_SUFFIX;
+    }
+
+    static String conversationWorkflowsKey(String conversationId) {
+        return CONVERSATION_KEY_PREFIX + conversationId + CONVERSATION_WORKFLOWS_SUFFIX;
     }
 
     static Duration workflowTtl() {
@@ -151,9 +209,73 @@ public class WorkflowService {
                     operations.opsForList().rightPush(sessionKey, startedWorkflow.workflowId());
                     operations.expire(sessionKey, WORKFLOW_TTL);
                 }
+                if (startedWorkflow != null && startedWorkflow.userId() != null && !startedWorkflow.userId().isBlank()) {
+                    indexUserWorkflow(operations, startedWorkflow.userId(), startedWorkflow.workflowId());
+                    if (startedWorkflow.conversationId() != null && !startedWorkflow.conversationId().isBlank()) {
+                        indexUserConversation(operations, startedWorkflow.userId(), startedWorkflow.conversationId());
+                    }
+                }
+                if (startedWorkflow != null && startedWorkflow.conversationId() != null && !startedWorkflow.conversationId().isBlank()) {
+                    indexConversationWorkflow(
+                            operations,
+                            startedWorkflow.conversationId(),
+                            startedWorkflow.workflowId()
+                    );
+                }
                 return null;
             }
         });
+    }
+
+    private void indexUserWorkflow(String userId, String workflowId) {
+        redisTemplate.executePipelined(new SessionCallback<Object>() {
+            @Override
+            public Object execute(RedisOperations operations) throws DataAccessException {
+                indexUserWorkflow(operations, userId, workflowId);
+                return null;
+            }
+        });
+    }
+
+    private void indexUserConversation(String userId, String conversationId) {
+        redisTemplate.executePipelined(new SessionCallback<Object>() {
+            @Override
+            public Object execute(RedisOperations operations) throws DataAccessException {
+                indexUserConversation(operations, userId, conversationId);
+                return null;
+            }
+        });
+    }
+
+    private void indexConversationWorkflow(String conversationId, String workflowId) {
+        redisTemplate.executePipelined(new SessionCallback<Object>() {
+            @Override
+            public Object execute(RedisOperations operations) throws DataAccessException {
+                indexConversationWorkflow(operations, conversationId, workflowId);
+                return null;
+            }
+        });
+    }
+
+    private void indexUserWorkflow(RedisOperations operations, String userId, String workflowId) {
+        String userKey = userWorkflowsKey(userId);
+        operations.opsForList().remove(userKey, 0, workflowId);
+        operations.opsForList().leftPush(userKey, workflowId);
+        operations.expire(userKey, WORKFLOW_TTL);
+    }
+
+    private void indexUserConversation(RedisOperations operations, String userId, String conversationId) {
+        String userKey = userConversationsKey(userId);
+        operations.opsForList().remove(userKey, 0, conversationId);
+        operations.opsForList().leftPush(userKey, conversationId);
+        operations.expire(userKey, WORKFLOW_TTL);
+    }
+
+    private void indexConversationWorkflow(RedisOperations operations, String conversationId, String workflowId) {
+        String conversationKey = conversationWorkflowsKey(conversationId);
+        operations.opsForList().remove(conversationKey, 0, workflowId);
+        operations.opsForList().leftPush(conversationKey, workflowId);
+        operations.expire(conversationKey, WORKFLOW_TTL);
     }
 
     private SessionWorkflowPosition sessionWorkflowPosition(String sessionId) {

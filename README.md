@@ -108,6 +108,36 @@ Run it with the same environment variables listed above:
 docker run --rm -p 8080:8080 --env-file .env stock-analysis-agent
 ```
 
+## Grafana
+
+Start the optional Grafana dashboard for workflow streams:
+
+```bash
+docker compose -f docker-compose.grafana.yml up
+```
+
+Open `http://localhost:3000/d/stock-analysis-workflows/workflow-event-log`.
+
+The Grafana container is also deployable to Cloud Run. The image bakes in the Redis datasource plugin, provisioning files, and dashboard JSON. Set `STOCK_ANALYSIS_AGENT_APP_BASE_URL` to the deployed app URL so the workflow timeline and metadata panels can call the app.
+
+Example deployment shape:
+
+```bash
+docker buildx build \
+  --platform linux/amd64 \
+  -t us-central1-docker.pkg.dev/PROJECT_ID/REPOSITORY/stock-analysis-agent-grafana:latest \
+  --push infra/grafana
+
+gcloud run deploy stock-analysis-agent-grafana \
+  --image us-central1-docker.pkg.dev/PROJECT_ID/REPOSITORY/stock-analysis-agent-grafana:latest \
+  --region us-central1 \
+  --port 3000 \
+  --allow-unauthenticated \
+  --max-instances 1 \
+  --set-env-vars STOCK_ANALYSIS_AGENT_APP_BASE_URL=https://APP_URL,STOCK_ANALYSIS_AGENT_REDIS_HOST=REDIS_HOST,STOCK_ANALYSIS_AGENT_REDIS_PORT=REDIS_PORT,STOCK_ANALYSIS_AGENT_REDIS_USERNAME=default,GF_AUTH_ANONYMOUS_ENABLED=true,GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer,GF_AUTH_DISABLE_LOGIN_FORM=true,GF_USERS_ALLOW_SIGN_UP=false,GF_EXPLORE_ENABLED=false,GF_PANELS_DISABLE_SANITIZE_HTML=true \
+  --set-secrets STOCK_ANALYSIS_AGENT_REDIS_PASSWORD=REDIS_PASSWORD_SECRET:latest
+```
+
 ## Docs
 
 More focused implementation notes are in these files:
@@ -115,3 +145,4 @@ More focused implementation notes are in these files:
 1. `docs/rate_limiter.md`
 2. `docs/session_management.md`
 3. `docs/caching.md`
+4. `docs/workflow_streams_grafana.md`

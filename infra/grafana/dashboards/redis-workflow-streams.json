@@ -1,0 +1,263 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": {
+        "type": "redis-datasource",
+        "uid": "redis"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "command": "xlen",
+          "datasource": {
+            "type": "redis-datasource",
+            "uid": "redis"
+          },
+          "keyName": "stock-analysis:workflows:${workflow_id}:events",
+          "query": "",
+          "refId": "A",
+          "type": "command"
+        }
+      ],
+      "title": "Stream entries",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "redis-datasource",
+        "uid": "redis"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 16,
+        "x": 8,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "content": "Run a chat request. Select a workflow. This dashboard reads `stock-analysis:workflows:{workflowId}:events` with Redis stream commands.",
+        "mode": "markdown"
+      },
+      "pluginVersion": "11.0.0",
+      "title": "Workflow event log",
+      "type": "text"
+    },
+    {
+      "datasource": {
+        "type": "redis-datasource",
+        "uid": "redis"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 16,
+        "w": 24,
+        "x": 0,
+        "y": 4
+      },
+      "id": 6,
+      "options": {
+        "content": "<iframe title=\"Workflow event sequence\" src=\"@@STOCK_ANALYSIS_AGENT_APP_BASE_URL@@/api/workflows/${workflow_id}/timeline\" style=\"width:100%;height:100%;border:0;background:#111217;\"></iframe>",
+        "mode": "html"
+      },
+      "pluginVersion": "11.0.0",
+      "title": "Workflow event sequence",
+      "type": "text"
+    },
+    {
+      "datasource": {
+        "type": "redis-datasource",
+        "uid": "redis"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 20
+      },
+      "id": 3,
+      "options": {
+        "content": "<iframe title=\"Workflow metadata\" src=\"@@STOCK_ANALYSIS_AGENT_APP_BASE_URL@@/api/workflows/${workflow_id}/metadata\" style=\"width:100%;height:100%;border:0;background:#111217;\"></iframe>",
+        "mode": "html"
+      },
+      "pluginVersion": "11.0.0",
+      "title": "Workflow metadata",
+      "type": "text"
+    },
+    {
+      "datasource": {
+        "type": "redis-datasource",
+        "uid": "redis"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 28
+      },
+      "id": 4,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "command": "xrange",
+          "count": 100,
+          "datasource": {
+            "type": "redis-datasource",
+            "uid": "redis"
+          },
+          "end": "+",
+          "keyName": "stock-analysis:workflows:${workflow_id}:events",
+          "query": "",
+          "refId": "A",
+          "start": "-",
+          "streaming": false,
+          "type": "command"
+        }
+      ],
+      "title": "Workflow stream",
+      "type": "table"
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 39,
+  "tags": [
+    "redis",
+    "agents",
+    "workflow"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {},
+        "datasource": {
+          "type": "redis-datasource",
+          "uid": "redis"
+        },
+        "definition": "keys stock-analysis:users:*:workflows",
+        "hide": 0,
+        "includeAll": false,
+        "label": "User",
+        "multi": false,
+        "name": "user_id",
+        "options": [],
+        "query": "keys stock-analysis:users:*:workflows",
+        "refresh": 2,
+        "regex": "/stock-analysis:users:([^:]+):workflows/",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": {},
+        "datasource": {
+          "type": "redis-datasource",
+          "uid": "redis"
+        },
+        "definition": "lrange stock-analysis:users:${user_id}:conversations 0 -1",
+        "hide": 0,
+        "includeAll": false,
+        "label": "Conversation",
+        "multi": false,
+        "name": "conversation_id",
+        "options": [],
+        "query": "lrange stock-analysis:users:${user_id}:conversations 0 -1",
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 0,
+        "type": "query"
+      },
+      {
+        "current": {},
+        "datasource": {
+          "type": "redis-datasource",
+          "uid": "redis"
+        },
+        "definition": "lrange stock-analysis:conversations:${conversation_id}:workflows 0 -1",
+        "hide": 0,
+        "includeAll": false,
+        "label": "Workflow",
+        "multi": false,
+        "name": "workflow_id",
+        "options": [],
+        "query": "lrange stock-analysis:conversations:${conversation_id}:workflows 0 -1",
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 0,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Workflow Event Log",
+  "uid": "stock-analysis-workflows",
+  "version": 1,
+  "weekStart": ""
+}
