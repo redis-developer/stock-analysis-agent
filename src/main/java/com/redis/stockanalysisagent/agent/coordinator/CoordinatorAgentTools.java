@@ -30,6 +30,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 @Service
@@ -91,12 +92,7 @@ public class CoordinatorAgentTools {
         String normalizedTicker = normalizeTicker(ticker);
         externalDataCache.clearRecordedAccesses();
         long startedAt = System.nanoTime();
-        progressPublisher.running(
-                agentStepId(AgentType.MARKET_DATA, normalizedTicker),
-                agentProgressLabel(AgentType.MARKET_DATA, normalizedTicker),
-                ChatProgressPublisher.KIND_AGENT,
-                "Triggering the market data agent."
-        );
+        agentRunning(AgentType.MARKET_DATA, normalizedTicker, "Triggering the market data agent.");
         try {
             MarketDataResult result = marketDataAgent.execute(normalizedTicker, question);
             List<ExternalDataAccess> accesses = externalDataCache.drainRecordedAccesses();
@@ -110,10 +106,9 @@ public class CoordinatorAgentTools {
                     result.getTokenUsage(),
                     accesses
             ));
-            progressPublisher.completed(
-                    agentStepId(AgentType.MARKET_DATA, normalizedTicker),
-                    agentProgressLabel(AgentType.MARKET_DATA, normalizedTicker),
-                    ChatProgressPublisher.KIND_AGENT,
+            agentCompleted(
+                    AgentType.MARKET_DATA,
+                    normalizedTicker,
                     elapsedDurationMs(startedAt),
                     result.getMessage(),
                     result.getTokenUsage(),
@@ -137,12 +132,7 @@ public class CoordinatorAgentTools {
         String normalizedTicker = normalizeTicker(ticker);
         externalDataCache.clearRecordedAccesses();
         long startedAt = System.nanoTime();
-        progressPublisher.running(
-                agentStepId(AgentType.FUNDAMENTALS, normalizedTicker),
-                agentProgressLabel(AgentType.FUNDAMENTALS, normalizedTicker),
-                ChatProgressPublisher.KIND_AGENT,
-                "Triggering the fundamentals agent."
-        );
+        agentRunning(AgentType.FUNDAMENTALS, normalizedTicker, "Triggering the fundamentals agent.");
         try {
             FundamentalsResult result = fundamentalsAgent.execute(
                     normalizedTicker,
@@ -159,10 +149,9 @@ public class CoordinatorAgentTools {
                     result.getTokenUsage(),
                     accesses
             ));
-            progressPublisher.completed(
-                    agentStepId(AgentType.FUNDAMENTALS, normalizedTicker),
-                    agentProgressLabel(AgentType.FUNDAMENTALS, normalizedTicker),
-                    ChatProgressPublisher.KIND_AGENT,
+            agentCompleted(
+                    AgentType.FUNDAMENTALS,
+                    normalizedTicker,
                     elapsedDurationMs(startedAt),
                     result.getMessage(),
                     result.getTokenUsage(),
@@ -186,12 +175,7 @@ public class CoordinatorAgentTools {
         String normalizedTicker = normalizeTicker(ticker);
         externalDataCache.clearRecordedAccesses();
         long startedAt = System.nanoTime();
-        progressPublisher.running(
-                agentStepId(AgentType.NEWS, normalizedTicker),
-                agentProgressLabel(AgentType.NEWS, normalizedTicker),
-                ChatProgressPublisher.KIND_AGENT,
-                "Triggering the news agent."
-        );
+        agentRunning(AgentType.NEWS, normalizedTicker, "Triggering the news agent.");
         try {
             NewsResult result = newsAgent.execute(normalizedTicker, question);
             List<ExternalDataAccess> accesses = externalDataCache.drainRecordedAccesses();
@@ -204,10 +188,9 @@ public class CoordinatorAgentTools {
                     result.getTokenUsage(),
                     accesses
             ));
-            progressPublisher.completed(
-                    agentStepId(AgentType.NEWS, normalizedTicker),
-                    agentProgressLabel(AgentType.NEWS, normalizedTicker),
-                    ChatProgressPublisher.KIND_AGENT,
+            agentCompleted(
+                    AgentType.NEWS,
+                    normalizedTicker,
                     elapsedDurationMs(startedAt),
                     result.getMessage(),
                     result.getTokenUsage(),
@@ -231,12 +214,7 @@ public class CoordinatorAgentTools {
         String normalizedTicker = normalizeTicker(ticker);
         externalDataCache.clearRecordedAccesses();
         long startedAt = System.nanoTime();
-        progressPublisher.running(
-                agentStepId(AgentType.TECHNICAL_ANALYSIS, normalizedTicker),
-                agentProgressLabel(AgentType.TECHNICAL_ANALYSIS, normalizedTicker),
-                ChatProgressPublisher.KIND_AGENT,
-                "Triggering the technical analysis agent."
-        );
+        agentRunning(AgentType.TECHNICAL_ANALYSIS, normalizedTicker, "Triggering the technical analysis agent.");
         try {
             TechnicalAnalysisResult result = technicalAnalysisAgent.execute(normalizedTicker, question);
             List<ExternalDataAccess> accesses = externalDataCache.drainRecordedAccesses();
@@ -249,10 +227,9 @@ public class CoordinatorAgentTools {
                     result.getTokenUsage(),
                     accesses
             ));
-            progressPublisher.completed(
-                    agentStepId(AgentType.TECHNICAL_ANALYSIS, normalizedTicker),
-                    agentProgressLabel(AgentType.TECHNICAL_ANALYSIS, normalizedTicker),
-                    ChatProgressPublisher.KIND_AGENT,
+            agentCompleted(
+                    AgentType.TECHNICAL_ANALYSIS,
+                    normalizedTicker,
                     elapsedDurationMs(startedAt),
                     result.getMessage(),
                     result.getTokenUsage(),
@@ -276,12 +253,7 @@ public class CoordinatorAgentTools {
         String normalizedTicker = normalizeTicker(ticker);
         externalDataCache.clearRecordedAccesses();
         long startedAt = System.nanoTime();
-        progressPublisher.running(
-                agentStepId(AgentType.BACKTEST, normalizedTicker),
-                agentProgressLabel(AgentType.BACKTEST, normalizedTicker),
-                ChatProgressPublisher.KIND_AGENT,
-                "Triggering the backtest agent."
-        );
+        agentRunning(AgentType.BACKTEST, normalizedTicker, "Triggering the backtest agent.");
         try {
             BacktestResult result = backtestAgent.execute(normalizedTicker, question);
             List<ExternalDataAccess> accesses = externalDataCache.drainRecordedAccesses();
@@ -293,10 +265,9 @@ public class CoordinatorAgentTools {
                     result.getTokenUsage(),
                     accesses
             ));
-            progressPublisher.completed(
-                    agentStepId(AgentType.BACKTEST, normalizedTicker),
-                    agentProgressLabel(AgentType.BACKTEST, normalizedTicker),
-                    ChatProgressPublisher.KIND_AGENT,
+            agentCompleted(
+                    AgentType.BACKTEST,
+                    normalizedTicker,
                     elapsedDurationMs(startedAt),
                     result.getMessage(),
                     result.getTokenUsage(),
@@ -321,12 +292,7 @@ public class CoordinatorAgentTools {
         String tickerLabel = tickerLabel(normalizedTickers);
         SynthesisEvidence evidence = trace().synthesisEvidence(normalizedTickers);
         long startedAt = System.nanoTime();
-        progressPublisher.running(
-                agentStepId(AgentType.SYNTHESIS, tickerLabel),
-                agentProgressLabel(AgentType.SYNTHESIS, tickerLabel),
-                ChatProgressPublisher.KIND_AGENT,
-                "Triggering the synthesis agent."
-        );
+        agentRunning(AgentType.SYNTHESIS, tickerLabel, "Triggering the synthesis agent.");
 
         if (evidence.isEmpty()) {
             String message = "Synthesis skipped because no specialist evidence is available.";
@@ -337,13 +303,7 @@ public class CoordinatorAgentTools {
                     elapsedDurationMs(startedAt),
                     null
             ));
-            progressPublisher.failed(
-                    agentStepId(AgentType.SYNTHESIS, tickerLabel),
-                    agentProgressLabel(AgentType.SYNTHESIS, tickerLabel),
-                    ChatProgressPublisher.KIND_AGENT,
-                    elapsedDurationMs(startedAt),
-                    message
-            );
+            agentFailed(AgentType.SYNTHESIS, tickerLabel, elapsedDurationMs(startedAt), message);
             return AgentToolResult.error(message);
         }
 
@@ -357,13 +317,13 @@ public class CoordinatorAgentTools {
                     result.getTokenUsage(),
                     List.of()
             ));
-            progressPublisher.completed(
-                    agentStepId(AgentType.SYNTHESIS, tickerLabel),
-                    agentProgressLabel(AgentType.SYNTHESIS, tickerLabel),
-                    ChatProgressPublisher.KIND_AGENT,
+            agentCompleted(
+                    AgentType.SYNTHESIS,
+                    tickerLabel,
                     elapsedDurationMs(startedAt),
                     result.getMessage(),
-                    result.getTokenUsage()
+                    result.getTokenUsage(),
+                    List.of()
             );
             return AgentToolResult.completed(result.getMessage(), result.getFinalResponse());
         } catch (RuntimeException ex) {
@@ -388,13 +348,7 @@ public class CoordinatorAgentTools {
                 null,
                 accesses
         ));
-        progressPublisher.failed(
-                agentStepId(agentType, ticker),
-                agentProgressLabel(agentType, ticker),
-                ChatProgressPublisher.KIND_AGENT,
-                elapsedDurationMs(startedAt),
-                message
-        );
+        agentFailed(agentType, ticker, elapsedDurationMs(startedAt), message);
         return AgentToolResult.error(message);
     }
 
@@ -416,6 +370,54 @@ public class CoordinatorAgentTools {
                 tokenUsage,
                 dataAccesses
         );
+    }
+
+    private void agentRunning(AgentType agentType, String ticker, String summary) {
+        progressPublisher.running(
+                agentStepId(agentType, ticker),
+                agentProgressLabel(agentType, ticker),
+                ChatProgressPublisher.KIND_AGENT,
+                summary,
+                ChatProgressPublisher.ACTOR_TYPE_SUB_AGENT,
+                agentActorName(agentType)
+        );
+    }
+
+    private void agentCompleted(
+            AgentType agentType,
+            String ticker,
+            long durationMs,
+            String summary,
+            TokenUsageSummary tokenUsage,
+            List<ExternalDataAccess> dataAccesses
+    ) {
+        progressPublisher.completed(
+                agentStepId(agentType, ticker),
+                agentProgressLabel(agentType, ticker),
+                ChatProgressPublisher.KIND_AGENT,
+                durationMs,
+                summary,
+                tokenUsage,
+                dataAccesses,
+                ChatProgressPublisher.ACTOR_TYPE_SUB_AGENT,
+                agentActorName(agentType)
+        );
+    }
+
+    private void agentFailed(AgentType agentType, String ticker, long durationMs, String summary) {
+        progressPublisher.failed(
+                agentStepId(agentType, ticker),
+                agentProgressLabel(agentType, ticker),
+                ChatProgressPublisher.KIND_AGENT,
+                durationMs,
+                summary,
+                ChatProgressPublisher.ACTOR_TYPE_SUB_AGENT,
+                agentActorName(agentType)
+        );
+    }
+
+    private String agentActorName(AgentType agentType) {
+        return agentType.name().toLowerCase(Locale.ROOT);
     }
 
     private ExecutionTrace trace() {

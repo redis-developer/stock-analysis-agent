@@ -1,5 +1,7 @@
 package com.redis.stockanalysisagent.agent.marketdata;
 
+import com.redis.stockanalysisagent.chat.ChatProgressPublisher;
+import com.redis.stockanalysisagent.instrumentation.ToolCallInstrumentation;
 import org.springframework.ai.chat.client.AdvisorParams;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
@@ -27,11 +29,16 @@ public class MarketDataAgentConfig {
     @Bean("marketDataChatClient")
     public ChatClient marketDataChatClient(
             ChatModel chatModel,
-            MarketDataTools marketDataTools
+            MarketDataTools marketDataTools,
+            ToolCallInstrumentation toolCallInstrumentation
     ) {
         return ChatClient.builder(chatModel)
                 .defaultAdvisors(AdvisorParams.ENABLE_NATIVE_STRUCTURED_OUTPUT)
-                .defaultTools(marketDataTools)
+                .defaultTools(toolCallInstrumentation.callbacks(
+                        ChatProgressPublisher.ACTOR_TYPE_SUB_AGENT,
+                        "market_data",
+                        marketDataTools
+                ))
                 .defaultSystem(DEFAULT_PROMPT)
                 .build();
     }

@@ -1,0 +1,19 @@
+package com.redis.stockanalysisagent.workflow;
+
+import java.time.Instant;
+
+public record WorkflowMetadata(
+        String workflowId,
+        String clientRequestId,
+        String userId,
+        String sessionId,
+        String conversationId,
+        WorkflowStatus status,
+        String previousWorkflowId,
+        Integer turnIndex,
+        Instant createdAt,
+        Instant updatedAt,
+        Instant finishedAt,
+        String failureReason
+) {
+}

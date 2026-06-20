@@ -1,5 +1,7 @@
 package com.redis.stockanalysisagent.agent.technicalanalysis;
 
+import com.redis.stockanalysisagent.chat.ChatProgressPublisher;
+import com.redis.stockanalysisagent.instrumentation.ToolCallInstrumentation;
 import org.springframework.ai.chat.client.AdvisorParams;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
@@ -27,11 +29,16 @@ public class TechnicalAnalysisAgentConfig {
     @Bean("technicalAnalysisChatClient")
     public ChatClient technicalAnalysisChatClient(
             ChatModel chatModel,
-            TechnicalAnalysisTools technicalAnalysisTools
+            TechnicalAnalysisTools technicalAnalysisTools,
+            ToolCallInstrumentation toolCallInstrumentation
     ) {
         return ChatClient.builder(chatModel)
                 .defaultAdvisors(AdvisorParams.ENABLE_NATIVE_STRUCTURED_OUTPUT)
-                .defaultTools(technicalAnalysisTools)
+                .defaultTools(toolCallInstrumentation.callbacks(
+                        ChatProgressPublisher.ACTOR_TYPE_SUB_AGENT,
+                        "technical_analysis",
+                        technicalAnalysisTools
+                ))
                 .defaultSystem(DEFAULT_PROMPT)
                 .build();
     }

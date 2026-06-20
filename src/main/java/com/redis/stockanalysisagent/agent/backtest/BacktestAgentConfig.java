@@ -1,5 +1,7 @@
 package com.redis.stockanalysisagent.agent.backtest;
 
+import com.redis.stockanalysisagent.chat.ChatProgressPublisher;
+import com.redis.stockanalysisagent.instrumentation.ToolCallInstrumentation;
 import org.springframework.ai.chat.client.AdvisorParams;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
@@ -35,11 +37,16 @@ public class BacktestAgentConfig {
     @Bean("backtestChatClient")
     public ChatClient backtestChatClient(
             ChatModel chatModel,
-            BacktestTools backtestTools
+            BacktestTools backtestTools,
+            ToolCallInstrumentation toolCallInstrumentation
     ) {
         return ChatClient.builder(chatModel)
                 .defaultAdvisors(AdvisorParams.ENABLE_NATIVE_STRUCTURED_OUTPUT)
-                .defaultTools(backtestTools)
+                .defaultTools(toolCallInstrumentation.callbacks(
+                        ChatProgressPublisher.ACTOR_TYPE_SUB_AGENT,
+                        "backtest",
+                        backtestTools
+                ))
                 .defaultSystem(DEFAULT_PROMPT)
                 .build();
     }

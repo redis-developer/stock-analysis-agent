@@ -137,6 +137,7 @@ public class ChatController {
                 userId,
                 sessionId,
                 request.message().trim(),
+                normalizeClientRequestId(request.clientRequestId()),
                 retrievedMemoriesLimit,
                 apiCachingEnabled,
                 semanticCachingEnabled,
@@ -150,6 +151,7 @@ public class ChatController {
                 prepared.userId(),
                 prepared.sessionId(),
                 prepared.message(),
+                prepared.clientRequestId(),
                 prepared.retrievedMemoriesLimit(),
                 prepared.apiCachingEnabled(),
                 prepared.semanticCachingEnabled()
@@ -174,7 +176,9 @@ public class ChatController {
                 providerUsageSnapshot(),
                 responseTimeMs,
                 turn.tickers(),
-                turn.triggeredAgents()
+                turn.triggeredAgents(),
+                turn.workflowId(),
+                turn.workflowStatus()
         );
     }
 
@@ -184,6 +188,10 @@ public class ChatController {
         }
 
         return apiUsageService.snapshot();
+    }
+
+    private String normalizeClientRequestId(String clientRequestId) {
+        return clientRequestId == null || clientRequestId.isBlank() ? null : clientRequestId.trim();
     }
 
     private void writeJsonLine(OutputStream outputStream, HttpServletResponse response, ChatProgressEvent event) {
@@ -207,6 +215,7 @@ public class ChatController {
             String userId,
             String sessionId,
             String message,
+            String clientRequestId,
             int retrievedMemoriesLimit,
             boolean apiCachingEnabled,
             boolean semanticCachingEnabled,

@@ -13,11 +13,15 @@ public record ChatExecutionStep(
         String summary,
         TokenUsageSummary tokenUsage,
         Integer loop,
-        List<ExternalDataAccess> dataAccesses
+        List<ExternalDataAccess> dataAccesses,
+        String actorType,
+        String actorName
 ) {
 
     public ChatExecutionStep {
         dataAccesses = dataAccesses == null ? List.of() : List.copyOf(dataAccesses);
+        actorType = clean(actorType);
+        actorName = clean(actorName);
     }
 
     public ChatExecutionStep(
@@ -28,18 +32,31 @@ public record ChatExecutionStep(
             String summary,
             TokenUsageSummary tokenUsage
     ) {
-        this(id, label, kind, durationMs, summary, tokenUsage, null, List.of());
+        this(
+                id,
+                label,
+                kind,
+                durationMs,
+                summary,
+                tokenUsage,
+                null,
+                List.of(),
+                defaultActorType(kind),
+                defaultActorName(kind)
+        );
     }
 
-    public ChatExecutionStep(
-            String id,
-            String label,
-            String kind,
-            long durationMs,
-            String summary,
-            TokenUsageSummary tokenUsage,
-            Integer loop
-    ) {
-        this(id, label, kind, durationMs, summary, tokenUsage, loop, List.of());
+    private static String defaultActorType(String kind) {
+        return ChatProgressPublisher.KIND_AGENT.equals(kind)
+                ? ChatProgressPublisher.KIND_AGENT
+                : ChatProgressPublisher.ACTOR_TYPE_SYSTEM;
+    }
+
+    private static String defaultActorName(String kind) {
+        return ChatProgressPublisher.KIND_AGENT.equals(kind) ? "" : ChatProgressPublisher.ACTOR_SYSTEM;
+    }
+
+    private static String clean(String value) {
+        return value == null ? "" : value.trim();
     }
 }

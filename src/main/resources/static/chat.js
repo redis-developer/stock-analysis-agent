@@ -727,7 +727,8 @@
         });
 
         try {
-            const response = await requestChatWithProgress(question, requestSessionId);
+            const clientRequestId = createClientRequestId();
+            const response = await requestChatWithProgress(question, requestSessionId, clientRequestId);
             const responseSessionId = normalizeSessionValue(response.sessionId) || requestSessionId;
             state.userId = response.userId || activeUserId();
             state.retrievedMemoriesLimit = normalizeRetrievedMemoriesLimit(
@@ -785,25 +786,25 @@
         }
     }
 
-    async function requestChatWithProgress(message, sessionId) {
+    async function requestChatWithProgress(message, sessionId, clientRequestId) {
         if (!canReadStreamingResponse()) {
-            return requestChat(message, sessionId);
+            return requestChat(message, sessionId, clientRequestId);
         }
 
         try {
-            return await requestChatStream(message, sessionId, function (step) {
+            return await requestChatStream(message, sessionId, clientRequestId, function (step) {
                 updateSessionProgress(sessionId, step);
             });
         } catch (error) {
             if (error && error.fallbackToChat) {
                 clearSessionProgress(sessionId);
-                return requestChat(message, sessionId);
+                return requestChat(message, sessionId, clientRequestId);
             }
             throw error;
         }
     }
 
-    async function requestChatStream(message, sessionId, onProgress) {
+    async function requestChatStream(message, sessionId, clientRequestId, onProgress) {
         let response;
         try {
             response = await fetch(new URL("./api/chat/stream", window.location.href), {
@@ -813,6 +814,7 @@
                 },
                 body: JSON.stringify({
                     sessionId: sessionId,
+                    clientRequestId: clientRequestId,
                     message: message,
                     retrievedMemoriesLimit: activeRetrievedMemoriesLimit(),
                     apiCachingEnabled: isApiCachingEnabled(),
@@ -912,7 +914,7 @@
         return error;
     }
 
-    async function requestChat(message, sessionId) {
+    async function requestChat(message, sessionId, clientRequestId) {
         const response = await fetch(new URL("./api/chat", window.location.href), {
             method: "POST",
             headers: {
@@ -920,6 +922,7 @@
             },
             body: JSON.stringify({
                 sessionId: sessionId,
+                clientRequestId: clientRequestId,
                 message: message,
                 retrievedMemoriesLimit: activeRetrievedMemoriesLimit(),
                 apiCachingEnabled: isApiCachingEnabled(),
@@ -2307,6 +2310,14 @@
             heading.appendChild(kindBadge);
         }
 
+        const actor = formatStepActor(step);
+        if (actor) {
+            const actorBadge = document.createElement("span");
+            actorBadge.className = "message__step-actor";
+            actorBadge.textContent = actor;
+            heading.appendChild(actorBadge);
+        }
+
         row.appendChild(heading);
 
         const stepTokenUsage = resolveTokenUsage(step);
@@ -2849,6 +2860,8 @@
                 id: step && step.id,
                 label: step && step.label,
                 kind: step && step.kind,
+                actorType: step && step.actorType,
+                actorName: step && step.actorName,
                 status: "completed",
                 summary: step && step.summary,
                 durationMs: step && step.durationMs,
@@ -2864,6 +2877,8 @@
                 id: step.id,
                 label: step.label,
                 kind: step.kind,
+                actorType: step.actorType,
+                actorName: step.actorName,
                 status: step.status,
                 summary: step.summary,
                 durationMs: step.durationMs,
@@ -2887,6 +2902,8 @@
             id: id,
             label: cleanProgressText(step.label) || id,
             kind: cleanProgressText(step.kind),
+            actorType: cleanProgressText(step.actorType),
+            actorName: cleanProgressText(step.actorName),
             status: normalizeProgressStatus(step.status),
             summary: cleanProgressText(step.summary),
             durationMs: Number.isFinite(step.durationMs) ? step.durationMs : null,
@@ -2931,6 +2948,10 @@
 
     function formatLiveActivityMeta(step) {
         const parts = [];
+        const actor = formatStepActor(step);
+        if (actor) {
+            parts.push(actor);
+        }
         if (step.kind) {
             parts.push(step.kind);
         }
@@ -2943,6 +2964,19 @@
             parts.push(formatTokenBadge(tokenUsage));
         }
         return parts.join(" ");
+    }
+
+    function formatStepActor(step) {
+        if (!step || typeof step !== "object") {
+            return "";
+        }
+
+        const actor = cleanProgressText(step.actorName) || cleanProgressText(step.actorType);
+        return actor ? formatProgressToken(actor) : "";
+    }
+
+    function formatProgressToken(value) {
+        return cleanProgressText(value).replace(/_/g, " ");
     }
 
     function setSessionLoading(sessionId, isLoading) {
@@ -3664,11 +3698,19 @@
     }
 
     function createSessionId() {
+        return createId("session");
+    }
+
+    function createClientRequestId() {
+        return createId("request");
+    }
+
+    function createId(prefix) {
         if (window.crypto && typeof window.crypto.randomUUID === "function") {
             return window.crypto.randomUUID();
         }
 
-        return "session-" + Date.now();
+        return prefix + "-" + Date.now();
     }
 
     function formatAgentLabel(agentName) {

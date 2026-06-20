@@ -12,6 +12,7 @@ public record ChatRequest(
         Integer retrievedMemoriesLimit,
         Boolean apiCachingEnabled,
         Boolean semanticCachingEnabled,
-        Boolean rateLimitingEnabled
+        Boolean rateLimitingEnabled,
+        String clientRequestId
 ) {
 }

@@ -1501,7 +1501,8 @@ body::before {
     min-width: 0;
 }
 
-.message__step-kind {
+.message__step-kind,
+.message__step-actor {
     display: inline-flex;
     align-items: center;
     min-height: 1.2rem;
@@ -1530,6 +1531,12 @@ body::before {
     background: rgba(168, 85, 247, 0.12);
     border-color: rgba(168, 85, 247, 0.24);
     color: #d8b4fe;
+}
+
+.message__step-actor {
+    background: rgba(244, 244, 245, 0.08);
+    border-color: rgba(244, 244, 245, 0.16);
+    color: var(--color-text-secondary);
 }
 
 .message__disclosure-item--loop {

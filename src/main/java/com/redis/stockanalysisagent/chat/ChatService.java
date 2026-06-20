@@ -4,6 +4,10 @@ import com.redis.stockanalysisagent.agent.TokenUsageSummary;
 import com.redis.stockanalysisagent.cache.ExternalDataCache;
 import com.redis.stockanalysisagent.memory.AmsChatMemoryRepository;
 import com.redis.stockanalysisagent.session.ConversationId;
+import com.redis.stockanalysisagent.workflow.WorkflowContextHolder;
+import com.redis.stockanalysisagent.workflow.WorkflowMetadata;
+import com.redis.stockanalysisagent.workflow.WorkflowService;
+import com.redis.stockanalysisagent.workflow.WorkflowStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -21,23 +25,27 @@ public class ChatService {
     private final ChatAnalysisService chatAnalysisService;
     private final ExternalDataCache externalDataCache;
     private final ChatProgressPublisher progressPublisher;
+    private final WorkflowService workflowService;
 
     public ChatService(
             AmsChatMemoryRepository memoryRepository,
             ChatAnalysisService chatAnalysisService,
             ExternalDataCache externalDataCache,
-            ChatProgressPublisher progressPublisher
+            ChatProgressPublisher progressPublisher,
+            WorkflowService workflowService
     ) {
         this.memoryRepository = memoryRepository;
         this.chatAnalysisService = chatAnalysisService;
         this.externalDataCache = externalDataCache;
         this.progressPublisher = progressPublisher;
+        this.workflowService = workflowService;
     }
 
     public ChatTurn chat(
             String userId,
             String sessionId,
             String message,
+            String clientRequestId,
             Integer retrievedMemoriesLimit,
             boolean apiCachingEnabled,
             boolean semanticCachingEnabled
@@ -45,90 +53,109 @@ public class ChatService {
         String conversationId = ConversationId.of(userId, sessionId).value();
         String normalizedMessage = message == null ? "" : message.trim();
         List<ChatExecutionStep> executionSteps = new ArrayList<>();
-        memoryRepository.setLastRetrievedMemories(List.of());
-        memoryRepository.setLastMemoryRetrievalDurationMs(null);
-        long analysisStartedAt = System.nanoTime();
-        progressPublisher.running(
-                "REQUEST_ANALYSIS",
-                "Analyzing request",
-                ChatProgressPublisher.KIND_SYSTEM,
-                "Preparing the stock analysis request."
-        );
-
-        ChatAnalysisService.AnalysisTurn analysisTurn;
-        externalDataCache.setCachingEnabled(apiCachingEnabled);
+        WorkflowMetadata workflow = null;
         try {
-            analysisTurn = chatAnalysisService.analyze(
-                    normalizedMessage,
+            workflow = startWorkflow(
+                    userId,
+                    sessionId,
                     conversationId,
-                    retrievedMemoriesLimit,
-                    semanticCachingEnabled,
-                    semanticCacheKey(userId, normalizedMessage)
+                    clientRequestId,
+                    executionSteps
             );
-        } catch (RuntimeException ex) {
-            progressPublisher.failed(
+            WorkflowContextHolder.setWorkflowId(workflow.workflowId());
+            memoryRepository.setLastRetrievedMemories(List.of());
+            memoryRepository.setLastMemoryRetrievalDurationMs(null);
+            long analysisStartedAt = System.nanoTime();
+            progressPublisher.running(
                     "REQUEST_ANALYSIS",
                     "Analyzing request",
                     ChatProgressPublisher.KIND_SYSTEM,
-                    elapsedDurationMs(analysisStartedAt),
-                    errorMessage(ex)
+                    "Preparing the stock analysis request."
             );
+
+            ChatAnalysisService.AnalysisTurn analysisTurn;
+            externalDataCache.setCachingEnabled(apiCachingEnabled);
+            try {
+                analysisTurn = chatAnalysisService.analyze(
+                        normalizedMessage,
+                        conversationId,
+                        retrievedMemoriesLimit,
+                        semanticCachingEnabled,
+                        semanticCacheKey(userId, normalizedMessage)
+                );
+            } catch (RuntimeException ex) {
+                progressPublisher.failed(
+                        "REQUEST_ANALYSIS",
+                        "Analyzing request",
+                        ChatProgressPublisher.KIND_SYSTEM,
+                        elapsedDurationMs(analysisStartedAt),
+                        errorMessage(ex)
+                );
+                throw ex;
+            } finally {
+                externalDataCache.clearCachingEnabled();
+            }
+            executionSteps.addAll(analysisTurn.executionSteps());
+            progressPublisher.completed(
+                    "REQUEST_ANALYSIS",
+                    "Analyzing request",
+                    ChatProgressPublisher.KIND_SYSTEM,
+                    sumDurationMs(analysisTurn.executionSteps()),
+                    "Completed the stock analysis request.",
+                    analysisTurn.tokenUsage()
+            );
+
+            long saveTurnStartedAt = System.nanoTime();
+            progressPublisher.running(
+                    "TURN_SAVE",
+                    "Saving turn",
+                    ChatProgressPublisher.KIND_SYSTEM,
+                    "Saving the user message and assistant response."
+            );
+            boolean saveSucceeded = saveTurn(
+                    conversationId,
+                    normalizedMessage,
+                    analysisTurn.response(),
+                    executionSteps,
+                    analysisTurn.tickers(),
+                    analysisTurn.triggeredAgents()
+            );
+            ChatExecutionStep saveStep = systemStep(
+                    "TURN_SAVE",
+                    "Turn save",
+                    elapsedDurationMs(saveTurnStartedAt),
+                    turnSaveSummary(saveSucceeded),
+                    null
+            );
+            executionSteps.add(saveStep);
+            progressPublisher.completed(
+                    saveStep.id(),
+                    "Saving turn",
+                    ChatProgressPublisher.KIND_SYSTEM,
+                    saveStep.durationMs(),
+                    saveStep.summary()
+            );
+
+            workflow = completeWorkflow(workflow, executionSteps);
+            return new ChatTurn(
+                    conversationId,
+                    analysisTurn.response(),
+                    memoryRepository.getLastRetrievedMemories(),
+                    analysisTurn.fromSemanticCache(),
+                    analysisTurn.fromSemanticGuardrail(),
+                    analysisTurn.tokenUsage(),
+                    List.copyOf(executionSteps),
+                    analysisTurn.tickers(),
+                    analysisTurn.triggeredAgents(),
+                    workflow.workflowId(),
+                    workflow.status()
+            );
+        } catch (RuntimeException ex) {
+            failWorkflow(workflow, ex);
             throw ex;
         } finally {
-            externalDataCache.clearCachingEnabled();
+            WorkflowContextHolder.clear();
         }
-        executionSteps.addAll(analysisTurn.executionSteps());
-        progressPublisher.completed(
-                "REQUEST_ANALYSIS",
-                "Analyzing request",
-                ChatProgressPublisher.KIND_SYSTEM,
-                sumDurationMs(executionSteps),
-                "Completed the stock analysis request.",
-                analysisTurn.tokenUsage()
-        );
-
-        long saveTurnStartedAt = System.nanoTime();
-        progressPublisher.running(
-                "TURN_SAVE",
-                "Saving turn",
-                ChatProgressPublisher.KIND_SYSTEM,
-                "Saving the user message and assistant response."
-        );
-        boolean saveSucceeded = saveTurn(
-                conversationId,
-                normalizedMessage,
-                analysisTurn.response(),
-                executionSteps,
-                analysisTurn.tickers(),
-                analysisTurn.triggeredAgents()
-        );
-        ChatExecutionStep saveStep = systemStep(
-                "TURN_SAVE",
-                "Turn save",
-                elapsedDurationMs(saveTurnStartedAt),
-                turnSaveSummary(saveSucceeded),
-                null
-        );
-        executionSteps.add(saveStep);
-        progressPublisher.completed(
-                saveStep.id(),
-                "Saving turn",
-                ChatProgressPublisher.KIND_SYSTEM,
-                saveStep.durationMs(),
-                saveStep.summary()
-        );
-
-        return new ChatTurn(
-                conversationId,
-                analysisTurn.response(),
-                memoryRepository.getLastRetrievedMemories(),
-                analysisTurn.fromSemanticCache(),
-                analysisTurn.fromSemanticGuardrail(),
-                analysisTurn.tokenUsage(),
-                List.copyOf(executionSteps),
-                analysisTurn.tickers(),
-                analysisTurn.triggeredAgents()
-        );
     }
 
     private boolean saveTurn(
@@ -156,6 +183,103 @@ public class ChatService {
             TokenUsageSummary tokenUsage
     ) {
         return new ChatExecutionStep(id, label, KIND_SYSTEM, durationMs, summary, tokenUsage);
+    }
+
+    private WorkflowMetadata startWorkflow(
+            String userId,
+            String sessionId,
+            String conversationId,
+            String clientRequestId,
+            List<ChatExecutionStep> executionSteps
+    ) {
+        long startedAt = System.nanoTime();
+        progressPublisher.running(
+                "WORKFLOW_START",
+                "Starting workflow",
+                ChatProgressPublisher.KIND_SYSTEM,
+                "Creating a workflow record for this chat request."
+        );
+        try {
+            WorkflowMetadata workflow = workflowService.start(userId, sessionId, conversationId, clientRequestId);
+            ChatExecutionStep step = systemStep(
+                    "WORKFLOW_START",
+                    "Workflow start",
+                    elapsedDurationMs(startedAt),
+                    "Created workflow " + workflow.workflowId() + ".",
+                    null
+            );
+            executionSteps.add(step);
+            progressPublisher.completed(
+                    step.id(),
+                    "Starting workflow",
+                    ChatProgressPublisher.KIND_SYSTEM,
+                    step.durationMs(),
+                    step.summary()
+            );
+            return workflow;
+        } catch (RuntimeException ex) {
+            progressPublisher.failed(
+                    "WORKFLOW_START",
+                    "Starting workflow",
+                    ChatProgressPublisher.KIND_SYSTEM,
+                    elapsedDurationMs(startedAt),
+                    errorMessage(ex)
+            );
+            throw ex;
+        }
+    }
+
+    private WorkflowMetadata completeWorkflow(WorkflowMetadata workflow, List<ChatExecutionStep> executionSteps) {
+        long startedAt = System.nanoTime();
+        progressPublisher.running(
+                "WORKFLOW_COMPLETE",
+                "Completing workflow",
+                ChatProgressPublisher.KIND_SYSTEM,
+                "Marking the workflow completed."
+        );
+        WorkflowMetadata completed = workflowService.complete(workflow);
+        ChatExecutionStep step = systemStep(
+                "WORKFLOW_COMPLETE",
+                "Workflow complete",
+                elapsedDurationMs(startedAt),
+                "Marked workflow " + completed.workflowId() + " completed.",
+                null
+        );
+        executionSteps.add(step);
+        progressPublisher.completed(
+                step.id(),
+                "Completing workflow",
+                ChatProgressPublisher.KIND_SYSTEM,
+                step.durationMs(),
+                step.summary()
+        );
+        return completed;
+    }
+
+    private void failWorkflow(WorkflowMetadata workflow, RuntimeException failure) {
+        if (workflow == null || workflow.status() == WorkflowStatus.COMPLETED) {
+            return;
+        }
+
+        long startedAt = System.nanoTime();
+        progressPublisher.running(
+                "WORKFLOW_FAILURE",
+                "Failing workflow",
+                ChatProgressPublisher.KIND_SYSTEM,
+                "Marking the workflow failed."
+        );
+        try {
+            WorkflowMetadata failed = workflowService.fail(workflow, failure);
+            progressPublisher.failed(
+                    "WORKFLOW_FAILURE",
+                    "Failing workflow",
+                    ChatProgressPublisher.KIND_SYSTEM,
+                    elapsedDurationMs(startedAt),
+                    "Marked workflow " + failed.workflowId() + " failed."
+            );
+        } catch (RuntimeException ex) {
+            failure.addSuppressed(ex);
+        }
     }
 
     private long elapsedDurationMs(long startedAt) {
@@ -192,30 +316,10 @@ public class ChatService {
             TokenUsageSummary tokenUsage,
             List<ChatExecutionStep> executionSteps,
             List<String> tickers,
-            List<String> triggeredAgents
+            List<String> triggeredAgents,
+            String workflowId,
+            WorkflowStatus workflowStatus
     ) {
-        public ChatTurn(
-                String conversationId,
-                String response,
-                List<String> retrievedMemories,
-                boolean fromSemanticCache,
-                boolean fromSemanticGuardrail,
-                TokenUsageSummary tokenUsage,
-                List<ChatExecutionStep> executionSteps
-        ) {
-            this(
-                    conversationId,
-                    response,
-                    retrievedMemories,
-                    fromSemanticCache,
-                    fromSemanticGuardrail,
-                    tokenUsage,
-                    executionSteps,
-                    List.of(),
-                    List.of()
-            );
-        }
-
         public ChatTurn {
             retrievedMemories = retrievedMemories == null ? List.of() : List.copyOf(retrievedMemories);
             executionSteps = executionSteps == null ? List.of() : List.copyOf(executionSteps);

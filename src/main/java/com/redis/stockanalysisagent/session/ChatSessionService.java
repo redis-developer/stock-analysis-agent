@@ -218,7 +218,9 @@ public class ChatSessionService {
                 text(raw.get("summary")),
                 tokenUsage(raw.get("tokenUsage")),
                 integerValue(raw.get("loop")),
-                dataAccesses(raw.get("dataAccesses"))
+                dataAccesses(raw.get("dataAccesses")),
+                text(raw.get("actorType")),
+                text(raw.get("actorName"))
         );
     }
 

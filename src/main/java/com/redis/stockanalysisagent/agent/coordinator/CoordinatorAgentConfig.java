@@ -1,6 +1,8 @@
 package com.redis.stockanalysisagent.agent.coordinator;
 
+import com.redis.stockanalysisagent.chat.ChatProgressPublisher;
 import com.redis.stockanalysisagent.memory.LongTermMemoryAdvisor;
+import com.redis.stockanalysisagent.instrumentation.ToolCallInstrumentation;
 import com.redis.stockanalysisagent.semanticcache.SemanticCacheAdvisor;
 import com.redis.stockanalysisagent.semanticguardrail.SemanticGuardrailAdvisor;
 import org.springframework.ai.chat.client.AdvisorParams;
@@ -112,7 +114,8 @@ public class CoordinatorAgentConfig {
             SemanticCacheAdvisor semanticCacheAdvisor,
             SemanticGuardrailAdvisor semanticGuardrailAdvisor,
             LongTermMemoryAdvisor longTermMemoryAdvisor,
-            CoordinatorAgentTools coordinatorAgentTools
+            CoordinatorAgentTools coordinatorAgentTools,
+            ToolCallInstrumentation toolCallInstrumentation
     ) {
         return ChatClient.builder(chatModel)
                 .defaultAdvisors(MessageChatMemoryAdvisor.builder(readOnly(chatMemory)).build())
@@ -120,7 +123,11 @@ public class CoordinatorAgentConfig {
                 .defaultAdvisors(semanticGuardrailAdvisor)
                 .defaultAdvisors(longTermMemoryAdvisor)
                 .defaultAdvisors(AdvisorParams.ENABLE_NATIVE_STRUCTURED_OUTPUT)
-                .defaultTools(coordinatorAgentTools)
+                .defaultTools(toolCallInstrumentation.callbacks(
+                        ChatProgressPublisher.ACTOR_TYPE_COORDINATOR,
+                        ChatProgressPublisher.ACTOR_COORDINATOR,
+                        coordinatorAgentTools
+                ))
                 .defaultSystem(DEFAULT_PROMPT)
                 .build();
     }

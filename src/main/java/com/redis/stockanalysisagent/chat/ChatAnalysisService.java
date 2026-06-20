@@ -4,13 +4,13 @@ import com.redis.stockanalysisagent.agent.AgentExecution;
 import com.redis.stockanalysisagent.agent.TokenUsageSummary;
 import com.redis.stockanalysisagent.agent.coordinator.CoordinatorAgent;
 import com.redis.stockanalysisagent.agent.coordinator.CoordinatorResponse;
-import com.redis.stockanalysisagent.cache.ExternalDataAccess;
 import com.redis.stockanalysisagent.memory.AmsChatMemoryRepository;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 
 @Service
 class ChatAnalysisService {
@@ -112,51 +112,22 @@ class ChatAnalysisService {
     }
 
     private ChatExecutionStep toExecutionStep(AgentExecution agentExecution) {
-        return analysisStep(
+        return new ChatExecutionStep(
                 agentExecution.ticker() == null || agentExecution.ticker().isBlank()
                         ? agentExecution.agentType().name()
                         : agentExecution.agentType().name() + ":" + agentExecution.ticker(),
                 agentExecution.ticker() == null || agentExecution.ticker().isBlank()
                         ? null
                         : agentExecution.agentType().name() + " " + agentExecution.ticker(),
+                KIND_AGENT,
                 agentExecution.durationMs(),
                 agentExecution.summary(),
                 agentExecution.tokenUsage(),
                 agentExecution.loop(),
-                agentExecution.dataAccesses()
+                agentExecution.dataAccesses(),
+                ChatProgressPublisher.ACTOR_TYPE_SUB_AGENT,
+                agentActorName(agentExecution)
         );
-    }
-
-    private ChatExecutionStep analysisStep(
-            String id,
-            long durationMs,
-            String summary,
-            TokenUsageSummary tokenUsage
-    ) {
-        return analysisStep(id, null, durationMs, summary, tokenUsage, null);
-    }
-
-    private ChatExecutionStep analysisStep(
-            String id,
-            String label,
-            long durationMs,
-            String summary,
-            TokenUsageSummary tokenUsage,
-            Integer loop
-    ) {
-        return analysisStep(id, label, durationMs, summary, tokenUsage, loop, List.of());
-    }
-
-    private ChatExecutionStep analysisStep(
-            String id,
-            String label,
-            long durationMs,
-            String summary,
-            TokenUsageSummary tokenUsage,
-            Integer loop,
-            List<ExternalDataAccess> dataAccesses
-    ) {
-        return new ChatExecutionStep(id, label, KIND_AGENT, durationMs, summary, tokenUsage, loop, dataAccesses);
     }
 
     private ChatExecutionStep coordinatorStep(
@@ -178,15 +149,25 @@ class ChatAnalysisService {
                     KIND_SYSTEM,
                     durationMs,
                     coordinatorSkippedSummary(coordinationResult.cacheHit()),
-                    coordinationResult.tokenUsage()
+                    coordinationResult.tokenUsage(),
+                    null,
+                    List.of(),
+                    ChatProgressPublisher.ACTOR_TYPE_COORDINATOR,
+                    ChatProgressPublisher.ACTOR_COORDINATOR
             );
         }
 
-        return analysisStep(
+        return new ChatExecutionStep(
                 COORDINATOR,
+                null,
+                KIND_AGENT,
                 durationMs,
                 coordinatorSummary(coordinationResult.coordinatorResponse(), coordinationResult.agentExecutions()),
-                coordinationResult.tokenUsage()
+                coordinationResult.tokenUsage(),
+                null,
+                List.of(),
+                ChatProgressPublisher.ACTOR_TYPE_COORDINATOR,
+                ChatProgressPublisher.ACTOR_COORDINATOR
         );
     }
 
@@ -338,6 +319,10 @@ class ChatAnalysisService {
         }
 
         return hasText(reasoning) ? "%s Reasoning: %s".formatted(baseSummary, reasoning) : baseSummary;
+    }
+
+    private String agentActorName(AgentExecution agentExecution) {
+        return agentExecution.agentType().name().toLowerCase(Locale.ROOT);
     }
 
     private boolean hasText(String value) {

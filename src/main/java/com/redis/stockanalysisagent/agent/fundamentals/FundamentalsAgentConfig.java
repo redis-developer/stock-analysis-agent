@@ -1,5 +1,7 @@
 package com.redis.stockanalysisagent.agent.fundamentals;
 
+import com.redis.stockanalysisagent.chat.ChatProgressPublisher;
+import com.redis.stockanalysisagent.instrumentation.ToolCallInstrumentation;
 import com.redis.stockanalysisagent.providers.FundamentalsProvider;
 import com.redis.stockanalysisagent.stock.MarketSnapshot;
 import org.springframework.ai.chat.client.AdvisorParams;
@@ -32,11 +34,16 @@ public class FundamentalsAgentConfig {
     @Bean("fundamentalsChatClientFactory")
     public Function<Optional<MarketSnapshot>, ChatClient> fundamentalsChatClientFactory(
             ChatModel chatModel,
-            FundamentalsProvider fundamentalsProvider
+            FundamentalsProvider fundamentalsProvider,
+            ToolCallInstrumentation toolCallInstrumentation
     ) {
         return marketSnapshot -> ChatClient.builder(chatModel)
                 .defaultAdvisors(AdvisorParams.ENABLE_NATIVE_STRUCTURED_OUTPUT)
-                .defaultTools(new FundamentalsTools(fundamentalsProvider, marketSnapshot))
+                .defaultTools(toolCallInstrumentation.callbacks(
+                        ChatProgressPublisher.ACTOR_TYPE_SUB_AGENT,
+                        "fundamentals",
+                        new FundamentalsTools(fundamentalsProvider, marketSnapshot)
+                ))
                 .defaultSystem(DEFAULT_PROMPT)
                 .build();
     }

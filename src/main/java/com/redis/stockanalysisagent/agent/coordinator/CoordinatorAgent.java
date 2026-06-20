@@ -52,7 +52,9 @@ public class CoordinatorAgent {
                 "COORDINATOR",
                 "Calling coordinator",
                 ChatProgressPublisher.KIND_AGENT,
-                "Routing the request and deciding which specialist agents to run."
+                "Routing the request and deciding which specialist agents to run.",
+                ChatProgressPublisher.ACTOR_TYPE_COORDINATOR,
+                ChatProgressPublisher.ACTOR_COORDINATOR
         );
         try {
             ResponseEntity<ChatResponse, CoordinatorResponse> response = coordinatorChatClient
@@ -110,7 +112,9 @@ public class CoordinatorAgent {
                     ChatProgressPublisher.KIND_AGENT,
                     elapsedDurationMs(startedAt),
                     coordinatorProgressSummary(cacheHit, guardrailHit, agentExecutions),
-                    result.tokenUsage()
+                    result.tokenUsage(),
+                    ChatProgressPublisher.ACTOR_TYPE_COORDINATOR,
+                    ChatProgressPublisher.ACTOR_COORDINATOR
             );
             return result;
         } catch (RuntimeException ex) {
@@ -119,7 +123,9 @@ public class CoordinatorAgent {
                     "Calling coordinator",
                     ChatProgressPublisher.KIND_AGENT,
                     elapsedDurationMs(startedAt),
-                    errorMessage(ex)
+                    errorMessage(ex),
+                    ChatProgressPublisher.ACTOR_TYPE_COORDINATOR,
+                    ChatProgressPublisher.ACTOR_COORDINATOR
             );
             throw ex;
         } finally {
