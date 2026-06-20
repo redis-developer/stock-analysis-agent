@@ -59,8 +59,11 @@ class WorkflowEventServiceTests {
 
         assertThat(WorkflowEventService.streamKey("workflow-1"))
                 .isEqualTo("stock-analysis:workflows:workflow-1:events");
-        assertThat(pipeline.streamKey()).isEqualTo("stock-analysis:workflows:workflow-1:events");
-        assertThat(pipeline.fields())
+        assertThat(WorkflowEventService.checkpointsKey("workflow-1"))
+                .isEqualTo("stock-analysis:workflows:workflow-1:checkpoints");
+        assertThat(pipeline.records()).hasSize(3);
+        assertThat(pipeline.records().getFirst().key()).isEqualTo("stock-analysis:workflows:workflow-1:events");
+        assertThat(pipeline.records().getFirst().fields())
                 .containsEntry("workflowId", "workflow-1")
                 .containsEntry("eventType", "tool.completed")
                 .containsEntry("stepId", "ANALYZE")
@@ -78,8 +81,61 @@ class WorkflowEventServiceTests {
                 .containsEntry("summary", "Analyzed stock.")
                 .containsEntry("durationMs", "42")
                 .containsEntry("timestamp", "2026-06-19T10:15:30Z");
+        assertThat(pipeline.records().get(1).key()).isEqualTo("stock-analysis:workflows:workflow-1:checkpoints");
+        assertThat(pipeline.records().get(1).fields())
+                .containsEntry("workflowId", "workflow-1")
+                .containsEntry("eventType", "checkpoint.created")
+                .containsEntry("checkpointId", "ANALYZE:market_data:1781864130000")
+                .containsEntry("sourceEventType", "tool.completed")
+                .containsEntry("stepId", "ANALYZE")
+                .containsEntry("actorName", "market_data")
+                .containsEntry("toolName", "getMarketSnapshot")
+                .containsEntry("inputPayload", "{\"ticker\":\"DUOL\"}")
+                .containsEntry("outputPayload", "{\"symbol\":\"DUOL\",\"currentPrice\":125.56}");
+        assertThat(pipeline.records().get(2).key()).isEqualTo("stock-analysis:workflows:workflow-1:events");
+        assertThat(pipeline.records().get(2).fields())
+                .containsEntry("workflowId", "workflow-1")
+                .containsEntry("eventType", "checkpoint.created")
+                .containsEntry("stepId", "checkpoint:ANALYZE")
+                .containsEntry("status", "completed")
+                .containsEntry("kind", "checkpoint")
+                .containsEntry("checkpointId", "ANALYZE:market_data:1781864130000")
+                .containsEntry("checkpointedStepId", "ANALYZE")
+                .containsEntry("checkpointedEventType", "tool.completed")
+                .containsEntry("summary", "Created checkpoint for ANALYZE.");
         verify(redisTemplate).executePipelined(any(SessionCallback.class));
         verify(pipeline.operations()).expire("stock-analysis:workflows:workflow-1:events", WorkflowService.workflowTtl());
+        verify(pipeline.operations()).expire("stock-analysis:workflows:workflow-1:checkpoints", WorkflowService.workflowTtl());
+    }
+
+    @Test
+    void appendRunningProgressEventDoesNotWriteCheckpoint() {
+        StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
+        PipelineCapture pipeline = capturePipeline(redisTemplate);
+        WorkflowEventService service = new WorkflowEventService(redisTemplate, CLOCK);
+        ChatProgressStep step = new ChatProgressStep(
+                "ANALYZE",
+                "Analyze stock",
+                ChatProgressPublisher.KIND_AGENT,
+                ChatProgressPublisher.STATUS_RUNNING,
+                null,
+                "Analyzing stock.",
+                null,
+                null,
+                List.of(),
+                ChatProgressPublisher.ACTOR_TYPE_SUB_AGENT,
+                "market_data",
+                ChatProgressMetadata.empty()
+        );
+
+        service.appendProgressEvent("workflow-1", step);
+
+        assertThat(pipeline.records()).hasSize(1);
+        assertThat(pipeline.records().getFirst().key()).isEqualTo("stock-analysis:workflows:workflow-1:events");
+        assertThat(pipeline.records().getFirst().fields())
+                .containsEntry("eventType", "progress")
+                .containsEntry("status", "running")
+                .doesNotContainKey("checkpointId");
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
@@ -94,25 +150,22 @@ class WorkflowEventServiceTests {
             return List.of();
         });
         doAnswer(invocation -> {
-            capturedStream.key = invocation.getArgument(0);
-            capturedStream.fields = invocation.getArgument(1);
+            capturedStream.records.add(new CapturedRecord(invocation.getArgument(0), invocation.getArgument(1)));
             return null;
         }).when(streamOperations).add(any(), any(Map.class));
         return new PipelineCapture(operations, capturedStream);
     }
 
     private record PipelineCapture(RedisOperations operations, CapturedStream capturedStream) {
-        private String streamKey() {
-            return capturedStream.key;
-        }
-
-        private Map<String, String> fields() {
-            return capturedStream.fields;
+        private List<CapturedRecord> records() {
+            return capturedStream.records;
         }
     }
 
+    private record CapturedRecord(String key, Map<String, String> fields) {
+    }
+
     private static final class CapturedStream {
-        private String key;
-        private Map<String, String> fields = Map.of();
+        private final List<CapturedRecord> records = new java.util.ArrayList<>();
     }
 }

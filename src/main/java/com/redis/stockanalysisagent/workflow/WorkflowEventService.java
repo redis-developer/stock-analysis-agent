@@ -18,6 +18,7 @@ import java.util.Map;
 public class WorkflowEventService {
 
     static final String EVENTS_SUFFIX = ":events";
+    static final String CHECKPOINTS_SUFFIX = ":checkpoints";
 
     private final StringRedisTemplate redisTemplate;
     private final Clock clock;
@@ -43,13 +44,24 @@ public class WorkflowEventService {
         return WorkflowService.workflowKey(workflowId) + EVENTS_SUFFIX;
     }
 
+    static String checkpointsKey(String workflowId) {
+        return WorkflowService.workflowKey(workflowId) + CHECKPOINTS_SUFFIX;
+    }
+
     private void append(String workflowId, ChatProgressStep step, Instant timestamp) {
         Map<String, String> fields = fields(workflowId, step, timestamp);
+        Map<String, String> checkpoint = checkpointFields(workflowId, step, fields, timestamp);
         redisTemplate.executePipelined(new SessionCallback<Object>() {
             @Override
             public Object execute(RedisOperations operations) throws DataAccessException {
                 String key = streamKey(workflowId);
                 operations.opsForStream().add(key, fields);
+                if (checkpoint != null) {
+                    String checkpointKey = checkpointsKey(workflowId);
+                    operations.opsForStream().add(checkpointKey, checkpoint);
+                    operations.expire(checkpointKey, WorkflowService.workflowTtl());
+                    operations.opsForStream().add(key, checkpointEventFields(workflowId, checkpoint, timestamp));
+                }
                 operations.expire(key, WorkflowService.workflowTtl());
                 return null;
             }
@@ -70,6 +82,66 @@ public class WorkflowEventService {
         appendMetadata(fields, step.metadata());
         fields.put("timestamp", timestamp.toString());
         return fields;
+    }
+
+    private Map<String, String> checkpointFields(
+            String workflowId,
+            ChatProgressStep step,
+            Map<String, String> eventFields,
+            Instant timestamp
+    ) {
+        if (!isCheckpointable(step)) {
+            return null;
+        }
+
+        Map<String, String> fields = new LinkedHashMap<>();
+        fields.put("workflowId", workflowId);
+        fields.put("eventType", "checkpoint.created");
+        fields.put("checkpointId", checkpointId(step, timestamp));
+        fields.put("sourceEventType", eventFields.getOrDefault("eventType", ""));
+        fields.put("stepId", step.id());
+        fields.put("status", value(step.status()));
+        fields.put("kind", value(step.kind()));
+        fields.put("actorType", value(step.actorType()));
+        fields.put("actorName", value(step.actorName()));
+        fields.put("summary", value(step.summary()));
+        fields.put("durationMs", step.durationMs() == null ? "" : step.durationMs().toString());
+        fields.put("timestamp", timestamp.toString());
+        appendMetadata(fields, step.metadata());
+        return fields;
+    }
+
+    private Map<String, String> checkpointEventFields(
+            String workflowId,
+            Map<String, String> checkpoint,
+            Instant timestamp
+    ) {
+        Map<String, String> fields = new LinkedHashMap<>();
+        fields.put("workflowId", workflowId);
+        fields.put("eventType", "checkpoint.created");
+        fields.put("stepId", "checkpoint:" + checkpoint.getOrDefault("stepId", ""));
+        fields.put("status", "completed");
+        fields.put("kind", "checkpoint");
+        fields.put("actorType", checkpoint.getOrDefault("actorType", ""));
+        fields.put("actorName", checkpoint.getOrDefault("actorName", ""));
+        fields.put("summary", "Created checkpoint for " + checkpoint.getOrDefault("stepId", "") + ".");
+        fields.put("checkpointId", checkpoint.getOrDefault("checkpointId", ""));
+        fields.put("checkpointedStepId", checkpoint.getOrDefault("stepId", ""));
+        fields.put("checkpointedEventType", checkpoint.getOrDefault("sourceEventType", ""));
+        fields.put("timestamp", timestamp.toString());
+        return fields;
+    }
+
+    private boolean isCheckpointable(ChatProgressStep step) {
+        if (!"completed".equals(step.status())) {
+            return false;
+        }
+        return "agent".equals(step.kind()) || (step.metadata() != null && !step.metadata().toolName().isBlank());
+    }
+
+    private String checkpointId(ChatProgressStep step, Instant timestamp) {
+        String actor = step.actorName() == null || step.actorName().isBlank() ? step.actorType() : step.actorName();
+        return step.id() + ":" + actor + ":" + timestamp.toEpochMilli();
     }
 
     private String eventType(ChatProgressStep step) {

@@ -7,12 +7,14 @@ Each chat request creates:
 ```text
 stock-analysis:workflows:{workflowId}
 stock-analysis:workflows:{workflowId}:events
+stock-analysis:workflows:{workflowId}:checkpoints
 stock-analysis:users:{userId}:workflows
 stock-analysis:users:{userId}:conversations
 stock-analysis:conversations:{conversationId}:workflows
 ```
 
-The hash stores workflow metadata. The stream stores the ordered agent events, including tool requests, tool results, summaries, actor names, and timing.
+The hash stores workflow metadata. The event stream stores the ordered agent events, including tool requests, tool results, summaries, actor names, checkpoint markers, and timing.
+The checkpoint stream stores completed replayable steps, starting with completed agent steps and completed tool calls.
 The user and conversation lists let Grafana filter workflow ids by user, then conversation, before reading the selected workflow hash and stream.
 
 ## Run
@@ -82,6 +84,7 @@ LRANGE stock-analysis:conversations:{conversationId}:workflows 0 -1
 XLEN stock-analysis:workflows:{workflowId}:events
 HGETALL stock-analysis:workflows:{workflowId}
 XRANGE stock-analysis:workflows:{workflowId}:events - +
+XREVRANGE stock-analysis:workflows:{workflowId}:checkpoints + - COUNT 1
 ```
 
 The workflow event sequence panel embeds the Spring app endpoint at `/api/workflows/{workflowId}/timeline`. That endpoint reads the Redis stream and renders each event with elapsed time, actor, event type, step id, duration, summary, and tool payload details.
