@@ -9,6 +9,8 @@ stock-analysis:workflows:{workflowId}
 stock-analysis:workflows:{workflowId}:events
 stock-analysis:workflows:{workflowId}:checkpoints
 stock-analysis:workflows:running
+stock-analysis:workflow-execution-locks:{operation}:{workflowId}:{checkpointId}
+stock-analysis:workflow-idempotency:{operation}:{workflowId}:{checkpointId}
 stock-analysis:users:{userId}:workflows
 stock-analysis:users:{userId}:conversations
 stock-analysis:conversations:{conversationId}:workflows
@@ -16,6 +18,8 @@ stock-analysis:conversations:{conversationId}:workflows
 
 The hash stores workflow metadata, including status, owner id, lease expiry, lease version, attempt, replay origin, and recovery target.
 The running sorted set indexes active workflows by lease expiry so another replica can find stale work after a crash.
+The execution lock keys prevent two replicas from replaying the same checkpoint at the same time.
+The idempotency keys store the completed replay or recovery workflow for a checkpoint so duplicate work can return the existing workflow.
 The event stream stores the ordered agent events, including tool requests, tool results, summaries, actor names, checkpoint markers, and timing.
 The checkpoint stream stores completed replayable steps, starting with completed agent steps and completed tool calls.
 The user and conversation lists let Grafana filter workflow ids by user, then conversation, before reading the selected workflow hash and stream.
@@ -89,6 +93,8 @@ HGETALL stock-analysis:workflows:{workflowId}
 XRANGE stock-analysis:workflows:{workflowId}:events - +
 XREVRANGE stock-analysis:workflows:{workflowId}:checkpoints + - COUNT 1
 ZRANGEBYSCORE stock-analysis:workflows:running -inf {now}
+SET stock-analysis:workflow-execution-locks:{operation}:{workflowId}:{checkpointId} {workerToken} NX PX {ttl}
+HGETALL stock-analysis:workflow-idempotency:{operation}:{workflowId}:{checkpointId}
 ```
 
 The workflow event sequence panel embeds the Spring app endpoint at `/api/workflows/{workflowId}/timeline`. That endpoint reads the Redis stream and renders each event with elapsed time, actor, event type, step id, duration, summary, and payload details.
@@ -111,5 +117,18 @@ On startup and on a timer, each replica scans `stock-analysis:workflows:running`
 The recovery worker reads the latest checkpoint and replays from it into a new workflow. The original workflow is marked `RECOVERED` with `recoveredByWorkflowId`. If no checkpoint exists, the original workflow is marked `FAILED`.
 
 Automatic recovery saves the recovered assistant answer under the original user message. It does not save the internal replay prompt as chat memory.
+
+## Distributed Worker Safety
+
+Manual replay and automatic recovery use the same idempotency shape:
+
+```text
+replay:{workflowId}:{checkpointId}
+recovery:{workflowId}:{checkpointId}
+```
+
+Before replaying, the app checks the idempotency hash. If a completed replay already exists, it returns that workflow id instead of running the agent again.
+
+If no completed record exists, the worker acquires a Redis lock with `SET NX` and a bounded TTL. Only the lock holder executes the replay. When the replay completes, it writes the idempotency hash with the resulting workflow id, conversation id, status, and completion time.
 
 Workflow data expires after 24 hours.

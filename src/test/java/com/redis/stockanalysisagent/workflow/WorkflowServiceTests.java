@@ -6,11 +6,13 @@ import org.springframework.data.redis.core.ListOperations;
 import org.springframework.data.redis.core.RedisOperations;
 import org.springframework.data.redis.core.SessionCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.data.redis.core.ZSetOperations;
 
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.Optional;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -18,6 +20,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -143,6 +146,70 @@ class WorkflowServiceTests {
         assertThat(failed.status()).isEqualTo(WorkflowStatus.FAILED);
         assertThat(failed.failureReason()).isEqualTo("analysis failed");
         assertThat(failed.finishedAt()).isEqualTo(Instant.parse("2026-06-19T10:15:30Z"));
+    }
+
+    @Test
+    void executionLockUsesRedisSetIfAbsentWithTtl() {
+        StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
+        ValueOperations<String, String> valueOperations = mock(ValueOperations.class);
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.setIfAbsent(
+                eq(WorkflowService.executionLockKey("replay:workflow-1:checkpoint-1")),
+                any(),
+                eq(WorkflowService.WORKFLOW_EXECUTION_LOCK_TTL)
+        )).thenReturn(true);
+        WorkflowService service = new WorkflowService(redisTemplate, CLOCK, () -> "unused", () -> "owner-1");
+
+        Optional<WorkflowService.ExecutionLock> lock =
+                service.tryAcquireExecutionLock("replay:workflow-1:checkpoint-1");
+
+        assertThat(lock).isPresent();
+    }
+
+    @Test
+    void completedIdempotentWorkflowReadsCompletedRecord() {
+        StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
+        HashOperations<String, Object, Object> hashOperations = mock(HashOperations.class);
+        when(redisTemplate.opsForHash()).thenReturn(hashOperations);
+        when(hashOperations.entries(WorkflowService.idempotencyKey("replay:workflow-1:checkpoint-1")))
+                .thenReturn(Map.of(
+                        "workflowId", "replay-workflow",
+                        "conversationId", "alice:session-1",
+                        "status", "COMPLETED"
+                ));
+        WorkflowService service = new WorkflowService(redisTemplate, CLOCK, () -> "unused", () -> "owner-1");
+
+        Optional<WorkflowService.IdempotentWorkflow> result =
+                service.completedIdempotentWorkflow("replay:workflow-1:checkpoint-1");
+
+        assertThat(result).isPresent();
+        assertThat(result.get().workflowId()).isEqualTo("replay-workflow");
+        assertThat(result.get().conversationId()).isEqualTo("alice:session-1");
+    }
+
+    @Test
+    void recordCompletedIdempotentWorkflowWritesBoundedHash() {
+        StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
+        PipelineCapture pipeline = capturePipeline(redisTemplate);
+        WorkflowService service = new WorkflowService(redisTemplate, CLOCK, () -> "unused", () -> "owner-1");
+
+        service.recordCompletedIdempotentWorkflow(
+                "replay:workflow-1:checkpoint-1",
+                "replay-workflow",
+                "alice:session-1",
+                WorkflowStatus.COMPLETED
+        );
+
+        assertThat(pipeline.fields())
+                .containsEntry("idempotencyKey", "replay:workflow-1:checkpoint-1")
+                .containsEntry("workflowId", "replay-workflow")
+                .containsEntry("conversationId", "alice:session-1")
+                .containsEntry("status", "COMPLETED")
+                .containsEntry("completedAt", "2026-06-19T10:15:30Z");
+        verify(pipeline.operations()).expire(
+                WorkflowService.idempotencyKey("replay:workflow-1:checkpoint-1"),
+                WorkflowService.workflowTtl()
+        );
     }
 
     private WorkflowMetadata runningWorkflow() {

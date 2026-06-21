@@ -19,6 +19,7 @@ import org.springframework.web.server.ResponseStatusException;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 @RestController
 @RequestMapping("/api/workflows")
@@ -30,15 +31,18 @@ public class WorkflowReplayController {
     private final StringRedisTemplate redisTemplate;
     private final ChatService chatService;
     private final WorkflowCheckpointService checkpointService;
+    private final WorkflowService workflowService;
 
     public WorkflowReplayController(
             StringRedisTemplate redisTemplate,
             ChatService chatService,
-            WorkflowCheckpointService checkpointService
+            WorkflowCheckpointService checkpointService,
+            WorkflowService workflowService
     ) {
         this.redisTemplate = redisTemplate;
         this.chatService = chatService;
         this.checkpointService = checkpointService;
+        this.workflowService = workflowService;
     }
 
     @GetMapping(value = "/{workflowId}/replay-context", produces = MediaType.TEXT_HTML_VALUE)
@@ -81,30 +85,82 @@ public class WorkflowReplayController {
                 userId,
                 sessionId
         );
-        ChatService.ChatTurn turn = chatService.replay(
-                userId,
-                sessionId,
-                checkpointService.replayMessage(workflowId, metadata, checkpoint),
-                replayClientRequestId(workflowId, checkpoint),
-                REPLAY_RETRIEVED_MEMORIES_LIMIT,
-                true,
-                false,
-                workflowId,
-                checkpoint.checkpointId()
-        );
-        log.info(
-                "workflow_replay_completed workflowId={} replayWorkflowId={} checkpointId={} status={}",
-                workflowId,
-                turn.workflowId(),
-                checkpoint.checkpointId(),
-                turn.workflowStatus()
-        );
+        String clientRequestId = replayClientRequestId(workflowId, checkpoint);
+        Optional<WorkflowService.IdempotentWorkflow> existing =
+                workflowService.completedIdempotentWorkflow(clientRequestId);
+        if (existing.isPresent()) {
+            log.info(
+                    "workflow_replay_idempotent_hit workflowId={} replayWorkflowId={} checkpointId={}",
+                    workflowId,
+                    existing.get().workflowId(),
+                    checkpoint.checkpointId()
+            );
+            return replayResponse(workflowId, checkpoint, existing.get());
+        }
+
+        Optional<WorkflowService.ExecutionLock> lock = workflowService.tryAcquireExecutionLock(clientRequestId);
+        if (lock.isEmpty()) {
+            log.info("workflow_replay_lock_busy workflowId={} checkpointId={}", workflowId, checkpoint.checkpointId());
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Replay is already running for this checkpoint.");
+        }
+
+        try (WorkflowService.ExecutionLock ignored = lock.get()) {
+            existing = workflowService.completedIdempotentWorkflow(clientRequestId);
+            if (existing.isPresent()) {
+                log.info(
+                        "workflow_replay_idempotent_hit workflowId={} replayWorkflowId={} checkpointId={}",
+                        workflowId,
+                        existing.get().workflowId(),
+                        checkpoint.checkpointId()
+                );
+                return replayResponse(workflowId, checkpoint, existing.get());
+            }
+
+            ChatService.ChatTurn turn = chatService.replay(
+                    userId,
+                    sessionId,
+                    checkpointService.replayMessage(workflowId, metadata, checkpoint),
+                    clientRequestId,
+                    REPLAY_RETRIEVED_MEMORIES_LIMIT,
+                    true,
+                    false,
+                    workflowId,
+                    checkpoint.checkpointId()
+            );
+            workflowService.recordCompletedIdempotentWorkflow(
+                    clientRequestId,
+                    turn.workflowId(),
+                    turn.conversationId(),
+                    turn.workflowStatus()
+            );
+            log.info(
+                    "workflow_replay_completed workflowId={} replayWorkflowId={} checkpointId={} status={}",
+                    workflowId,
+                    turn.workflowId(),
+                    checkpoint.checkpointId(),
+                    turn.workflowStatus()
+            );
+            return new ReplayResponse(
+                    workflowId,
+                    turn.workflowId(),
+                    checkpoint.checkpointId(),
+                    turn.workflowStatus().name(),
+                    turn.conversationId()
+            );
+        }
+    }
+
+    private ReplayResponse replayResponse(
+            String workflowId,
+            WorkflowCheckpoint checkpoint,
+            WorkflowService.IdempotentWorkflow existing
+    ) {
         return new ReplayResponse(
                 workflowId,
-                turn.workflowId(),
+                existing.workflowId(),
                 checkpoint.checkpointId(),
-                turn.workflowStatus().name(),
-                turn.conversationId()
+                existing.status(),
+                existing.conversationId()
         );
     }
 

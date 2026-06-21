@@ -44,6 +44,8 @@ public class WorkflowService {
     static final String SESSION_KEY_PREFIX = "stock-analysis:sessions:";
     static final String SESSION_WORKFLOWS_SUFFIX = ":workflows";
     static final String RUNNING_WORKFLOWS_KEY = "stock-analysis:workflows:running";
+    static final String EXECUTION_LOCK_KEY_PREFIX = "stock-analysis:workflow-execution-locks:";
+    static final String IDEMPOTENCY_KEY_PREFIX = "stock-analysis:workflow-idempotency:";
     static final String USER_KEY_PREFIX = "stock-analysis:users:";
     static final String USER_CONVERSATIONS_SUFFIX = ":conversations";
     static final String USER_WORKFLOWS_SUFFIX = ":workflows";
@@ -52,6 +54,7 @@ public class WorkflowService {
     static final Duration WORKFLOW_TTL = Duration.ofHours(24);
     static final Duration DEFAULT_WORKFLOW_LEASE = Duration.ofSeconds(15);
     static final Duration DEFAULT_WORKFLOW_LEASE_RENEWAL_INTERVAL = Duration.ofSeconds(5);
+    static final Duration WORKFLOW_EXECUTION_LOCK_TTL = Duration.ofMinutes(10);
     public static final String REPLAYED_FROM_WORKFLOW_ID = "replayedFromWorkflowId";
     public static final String REPLAY_CHECKPOINT_ID = "replayCheckpointId";
     public static final String RECOVERED_BY_WORKFLOW_ID = "recoveredByWorkflowId";
@@ -130,6 +133,12 @@ public class WorkflowService {
             redis.call('EXPIRE', workflow_key, ARGV[9])
             redis.call('EXPIRE', running_key, ARGV[9])
             return 1
+            """, Long.class);
+    private static final RedisScript<Long> RELEASE_LOCK_SCRIPT = new DefaultRedisScript<>("""
+            if redis.call('GET', KEYS[1]) == ARGV[1] then
+              return redis.call('DEL', KEYS[1])
+            end
+            return 0
             """, Long.class);
 
     private final StringRedisTemplate redisTemplate;
@@ -331,6 +340,14 @@ public class WorkflowService {
         return RUNNING_WORKFLOWS_KEY;
     }
 
+    static String executionLockKey(String idempotencyKey) {
+        return EXECUTION_LOCK_KEY_PREFIX + idempotencyKey;
+    }
+
+    static String idempotencyKey(String idempotencyKey) {
+        return IDEMPOTENCY_KEY_PREFIX + idempotencyKey;
+    }
+
     static Duration workflowTtl() {
         return WORKFLOW_TTL;
     }
@@ -436,6 +453,82 @@ public class WorkflowService {
         return terminal(workflow, WorkflowStatus.RECOVERED, null, recoveredByWorkflowId);
     }
 
+    public Optional<ExecutionLock> tryAcquireExecutionLock(String idempotencyKey) {
+        String normalizedKey = blankToNull(idempotencyKey);
+        if (normalizedKey == null) {
+            return Optional.empty();
+        }
+
+        String lockKey = executionLockKey(normalizedKey);
+        String token = UUID.randomUUID().toString();
+        Boolean acquired = redisTemplate.opsForValue().setIfAbsent(lockKey, token, WORKFLOW_EXECUTION_LOCK_TTL);
+        if (Boolean.TRUE.equals(acquired)) {
+            log.info("workflow_execution_lock_acquired idempotencyKey={}", normalizedKey);
+            return Optional.of(new ExecutionLock(() -> releaseExecutionLock(lockKey, token)));
+        }
+
+        log.info("workflow_execution_lock_busy idempotencyKey={}", normalizedKey);
+        return Optional.empty();
+    }
+
+    public Optional<IdempotentWorkflow> completedIdempotentWorkflow(String idempotencyKey) {
+        String normalizedKey = blankToNull(idempotencyKey);
+        if (normalizedKey == null) {
+            return Optional.empty();
+        }
+
+        Map<Object, Object> fields = redisTemplate.opsForHash().entries(idempotencyKey(normalizedKey));
+        if (fields.isEmpty() || !"COMPLETED".equals(value(fields, "status"))) {
+            return Optional.empty();
+        }
+
+        String workflowId = value(fields, "workflowId");
+        if (workflowId.isBlank()) {
+            return Optional.empty();
+        }
+
+        return Optional.of(new IdempotentWorkflow(
+                workflowId,
+                value(fields, "conversationId"),
+                value(fields, "status")
+        ));
+    }
+
+    public void recordCompletedIdempotentWorkflow(
+            String idempotencyKey,
+            String workflowId,
+            String conversationId,
+            WorkflowStatus status
+    ) {
+        String normalizedKey = blankToNull(idempotencyKey);
+        if (normalizedKey == null || workflowId == null || workflowId.isBlank()) {
+            return;
+        }
+
+        Map<String, String> fields = new LinkedHashMap<>();
+        put(fields, "idempotencyKey", normalizedKey);
+        put(fields, "workflowId", workflowId);
+        put(fields, "conversationId", conversationId);
+        put(fields, "status", status == null ? null : status.name());
+        put(fields, "completedAt", Instant.now(clock));
+
+        String key = idempotencyKey(normalizedKey);
+        redisTemplate.executePipelined(new SessionCallback<Object>() {
+            @Override
+            public Object execute(RedisOperations operations) throws DataAccessException {
+                operations.opsForHash().putAll(key, fields);
+                operations.expire(key, WORKFLOW_TTL);
+                return null;
+            }
+        });
+        log.info(
+                "workflow_idempotency_recorded idempotencyKey={} workflowId={} status={}",
+                normalizedKey,
+                workflowId,
+                status
+        );
+    }
+
     public WorkflowMetadata readWorkflow(String workflowId) {
         Map<Object, Object> fields = redisTemplate.opsForHash().entries(workflowKey(workflowId));
         if (fields.isEmpty()) {
@@ -505,6 +598,11 @@ public class WorkflowService {
     @PreDestroy
     void stopLeaseRenewalExecutor() {
         leaseRenewalExecutor.shutdownNow();
+    }
+
+    private void releaseExecutionLock(String lockKey, String token) {
+        Long result = redisTemplate.execute(RELEASE_LOCK_SCRIPT, List.of(lockKey), token);
+        log.debug("workflow_execution_lock_released lockKey={} result={}", lockKey, result);
     }
 
     private WorkflowMetadata terminal(WorkflowMetadata workflow, WorkflowStatus status, String failureReason) {
@@ -839,6 +937,36 @@ public class WorkflowService {
                 future.cancel(false);
             }
         }
+    }
+
+    public static final class ExecutionLock implements AutoCloseable {
+
+        private final Runnable release;
+        private boolean closed;
+
+        private ExecutionLock(Runnable release) {
+            this.release = release;
+        }
+
+        public static ExecutionLock noop() {
+            return new ExecutionLock(() -> {
+            });
+        }
+
+        @Override
+        public void close() {
+            if (!closed) {
+                closed = true;
+                release.run();
+            }
+        }
+    }
+
+    public record IdempotentWorkflow(
+            String workflowId,
+            String conversationId,
+            String status
+    ) {
     }
 
     public static class WorkflowOwnershipException extends RuntimeException {

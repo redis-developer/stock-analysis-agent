@@ -100,36 +100,81 @@ public class WorkflowRecoveryService {
             }
 
             try {
-                Map<Object, Object> metadata = redisTemplate.opsForHash().entries(WorkflowService.workflowKey(workflow.workflowId()));
-                String originalUserMessage = checkpointService.originalUserMessage(workflow.workflowId())
-                        .orElse(checkpoint.get().inputPayload());
-                log.info(
-                        "workflow_recovery_replay_started workflowId={} checkpointId={} stepId={} originalMessageBytes={}",
-                        workflow.workflowId(),
-                        checkpoint.get().checkpointId(),
-                        checkpoint.get().stepId(),
-                        originalUserMessage == null ? 0 : originalUserMessage.length()
-                );
-                ChatService.ChatTurn turn = chatService.recover(
-                        workflow.userId(),
-                        workflow.sessionId(),
-                        checkpointService.replayMessage(workflow.workflowId(), metadata, checkpoint.get()),
-                        originalUserMessage,
-                        recoveryClientRequestId(workflow, checkpoint.get()),
-                        REPLAY_RETRIEVED_MEMORIES_LIMIT,
-                        true,
-                        false,
-                        workflow.workflowId(),
-                        checkpoint.get().checkpointId()
-                );
-                workflowService.markRecovered(workflow, turn.workflowId());
-                log.info(
-                        "workflow_recovery_replay_completed workflowId={} recoveredByWorkflowId={} checkpointId={} responseSteps={}",
-                        workflow.workflowId(),
-                        turn.workflowId(),
-                        checkpoint.get().checkpointId(),
-                        turn.executionSteps().size()
-                );
+                String clientRequestId = recoveryClientRequestId(workflow, checkpoint.get());
+                Optional<WorkflowService.IdempotentWorkflow> existing =
+                        workflowService.completedIdempotentWorkflow(clientRequestId);
+                if (existing.isPresent()) {
+                    workflowService.markRecovered(workflow, existing.get().workflowId());
+                    log.info(
+                            "workflow_recovery_idempotent_hit workflowId={} recoveredByWorkflowId={} checkpointId={}",
+                            workflow.workflowId(),
+                            existing.get().workflowId(),
+                            checkpoint.get().checkpointId()
+                    );
+                    return;
+                }
+
+                Optional<WorkflowService.ExecutionLock> lock = workflowService.tryAcquireExecutionLock(clientRequestId);
+                if (lock.isEmpty()) {
+                    log.info(
+                            "workflow_recovery_lock_busy workflowId={} checkpointId={}",
+                            workflow.workflowId(),
+                            checkpoint.get().checkpointId()
+                    );
+                    return;
+                }
+
+                try (WorkflowService.ExecutionLock executionLock = lock.get()) {
+                    existing = workflowService.completedIdempotentWorkflow(clientRequestId);
+                    if (existing.isPresent()) {
+                        workflowService.markRecovered(workflow, existing.get().workflowId());
+                        log.info(
+                                "workflow_recovery_idempotent_hit workflowId={} recoveredByWorkflowId={} checkpointId={}",
+                                workflow.workflowId(),
+                                existing.get().workflowId(),
+                                checkpoint.get().checkpointId()
+                        );
+                        return;
+                    }
+
+                    Map<Object, Object> metadata = redisTemplate.opsForHash()
+                            .entries(WorkflowService.workflowKey(workflow.workflowId()));
+                    String originalUserMessage = checkpointService.originalUserMessage(workflow.workflowId())
+                            .orElse(checkpoint.get().inputPayload());
+                    log.info(
+                            "workflow_recovery_replay_started workflowId={} checkpointId={} stepId={} originalMessageBytes={}",
+                            workflow.workflowId(),
+                            checkpoint.get().checkpointId(),
+                            checkpoint.get().stepId(),
+                            originalUserMessage == null ? 0 : originalUserMessage.length()
+                    );
+                    ChatService.ChatTurn turn = chatService.recover(
+                            workflow.userId(),
+                            workflow.sessionId(),
+                            checkpointService.replayMessage(workflow.workflowId(), metadata, checkpoint.get()),
+                            originalUserMessage,
+                            clientRequestId,
+                            REPLAY_RETRIEVED_MEMORIES_LIMIT,
+                            true,
+                            false,
+                            workflow.workflowId(),
+                            checkpoint.get().checkpointId()
+                    );
+                    workflowService.recordCompletedIdempotentWorkflow(
+                            clientRequestId,
+                            turn.workflowId(),
+                            turn.conversationId(),
+                            turn.workflowStatus()
+                    );
+                    workflowService.markRecovered(workflow, turn.workflowId());
+                    log.info(
+                            "workflow_recovery_replay_completed workflowId={} recoveredByWorkflowId={} checkpointId={} responseSteps={}",
+                            workflow.workflowId(),
+                            turn.workflowId(),
+                            checkpoint.get().checkpointId(),
+                            turn.executionSteps().size()
+                    );
+                }
             } catch (RuntimeException ex) {
                 workflowService.fail(workflow, ex);
                 log.warn(
@@ -145,6 +190,6 @@ public class WorkflowRecoveryService {
     }
 
     private String recoveryClientRequestId(WorkflowMetadata workflow, WorkflowCheckpoint checkpoint) {
-        return "recovery:" + workflow.workflowId() + ":" + workflow.leaseVersion() + ":" + checkpoint.checkpointId();
+        return "recovery:" + workflow.workflowId() + ":" + checkpoint.checkpointId();
     }
 }

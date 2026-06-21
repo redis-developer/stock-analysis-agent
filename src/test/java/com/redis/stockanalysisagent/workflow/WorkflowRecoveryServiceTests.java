@@ -42,6 +42,9 @@ class WorkflowRecoveryServiceTests {
         when(workflowService.tryClaimExpired("workflow-1")).thenReturn(Optional.of(workflow));
         when(workflowService.renewLeaseUntilClosed(workflow)).thenReturn(WorkflowService.Lease.noop());
         when(checkpointService.latestCheckpoint("workflow-1")).thenReturn(Optional.of(checkpoint));
+        when(workflowService.completedIdempotentWorkflow("recovery:workflow-1:checkpoint-1")).thenReturn(Optional.empty());
+        when(workflowService.tryAcquireExecutionLock("recovery:workflow-1:checkpoint-1"))
+                .thenReturn(Optional.of(WorkflowService.ExecutionLock.noop()));
         when(checkpointService.originalUserMessage("workflow-1")).thenReturn(Optional.of("original question"));
         when(checkpointService.replayMessage(eq("workflow-1"), any(), eq(checkpoint))).thenReturn("replay prompt");
         when(chatService.recover(
@@ -49,7 +52,7 @@ class WorkflowRecoveryServiceTests {
                 eq("session-1"),
                 eq("replay prompt"),
                 eq("original question"),
-                eq("recovery:workflow-1:2:checkpoint-1"),
+                eq("recovery:workflow-1:checkpoint-1"),
                 eq(10),
                 eq(true),
                 eq(false),
@@ -71,7 +74,33 @@ class WorkflowRecoveryServiceTests {
 
         recoveryService.recoverExpiredWorkflows();
 
+        verify(workflowService).recordCompletedIdempotentWorkflow(
+                "recovery:workflow-1:checkpoint-1",
+                "replay-workflow",
+                "alice:session-1",
+                WorkflowStatus.COMPLETED
+        );
         verify(workflowService).markRecovered(workflow, "replay-workflow");
+    }
+
+    @Test
+    void completedRecoveryIdempotencyRecordMarksWorkflowRecoveredWithoutReplay() {
+        WorkflowMetadata workflow = workflow();
+        WorkflowCheckpoint checkpoint = checkpoint();
+        when(workflowService.expiredRunningWorkflowIds(25)).thenReturn(List.of("workflow-1"));
+        when(workflowService.tryClaimExpired("workflow-1")).thenReturn(Optional.of(workflow));
+        when(workflowService.renewLeaseUntilClosed(workflow)).thenReturn(WorkflowService.Lease.noop());
+        when(checkpointService.latestCheckpoint("workflow-1")).thenReturn(Optional.of(checkpoint));
+        when(workflowService.completedIdempotentWorkflow("recovery:workflow-1:checkpoint-1"))
+                .thenReturn(Optional.of(new WorkflowService.IdempotentWorkflow(
+                        "existing-replay-workflow",
+                        "alice:session-1",
+                        "COMPLETED"
+                )));
+
+        recoveryService.recoverExpiredWorkflows();
+
+        verify(workflowService).markRecovered(workflow, "existing-replay-workflow");
     }
 
     private WorkflowMetadata workflow() {
