@@ -2,6 +2,8 @@ package com.redis.stockanalysisagent.instrumentation;
 
 import com.redis.stockanalysisagent.chat.ChatProgressMetadata;
 import com.redis.stockanalysisagent.chat.ChatProgressPublisher;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.support.ToolCallbacks;
 import org.springframework.ai.tool.ToolCallback;
@@ -27,6 +29,7 @@ import java.util.function.Supplier;
 @SuppressWarnings("deprecation")
 public class ToolCallInstrumentation {
 
+    private static final Logger log = LoggerFactory.getLogger(ToolCallInstrumentation.class);
     private static final ObjectMapper OBJECT_MAPPER = JsonMapper.builder().build();
     private static final HexFormat HEX_FORMAT = HexFormat.of();
     private static final int MAX_SUMMARY_FIELDS = 6;
@@ -87,6 +90,15 @@ public class ToolCallInstrumentation {
             String argumentSummary = argumentSummary(toolInput);
             String summarySuffix = summarySuffix(argumentSummary);
             long startedAt = System.nanoTime();
+            Long inputBytes = sizeBytes(toolInput);
+            log.info(
+                    "tool_call_started stepId={} toolName={} actorType={} actorName={} inputBytes={}",
+                    stepId,
+                    toolName,
+                    actorType,
+                    actorName,
+                    inputBytes
+            );
 
             progressPublisher.running(
                     stepId,
@@ -100,11 +112,21 @@ public class ToolCallInstrumentation {
 
             try {
                 String result = action.get();
+                long durationMs = elapsedDurationMs(startedAt);
+                log.info(
+                        "tool_call_completed stepId={} toolName={} actorType={} actorName={} durationMs={} outputBytes={}",
+                        stepId,
+                        toolName,
+                        actorType,
+                        actorName,
+                        durationMs,
+                        sizeBytes(result)
+                );
                 progressPublisher.completed(
                         stepId,
                         label,
                         ChatProgressPublisher.KIND_SYSTEM,
-                        elapsedDurationMs(startedAt),
+                        durationMs,
                         "Completed tool " + toolName + summarySuffix + ".",
                         actorType,
                         actorName,
@@ -112,11 +134,22 @@ public class ToolCallInstrumentation {
                 );
                 return result;
             } catch (RuntimeException ex) {
+                long durationMs = elapsedDurationMs(startedAt);
+                log.warn(
+                        "tool_call_failed stepId={} toolName={} actorType={} actorName={} durationMs={} error={}",
+                        stepId,
+                        toolName,
+                        actorType,
+                        actorName,
+                        durationMs,
+                        rootCauseType(ex),
+                        ex
+                );
                 progressPublisher.failed(
                         stepId,
                         label,
                         ChatProgressPublisher.KIND_SYSTEM,
-                        elapsedDurationMs(startedAt),
+                        durationMs,
                         "Failed tool " + toolName + summarySuffix + ": " + rootCauseType(ex) + ".",
                         actorType,
                         actorName,

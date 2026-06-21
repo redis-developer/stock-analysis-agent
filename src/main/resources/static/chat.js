@@ -3,16 +3,20 @@
     const sessionLabelsStorageKey = "stock-analysis-chat:session-labels";
     const maxRetrievedMemoriesLimit = 20;
     const defaultRateLimitLimit = 6;
+    const sessionRefreshIntervalMs = 2000;
     const memoryTabAll = "all";
     const memoryTabCurrentChat = "current-chat";
 
     const state = {
         loading: false,
         sessionsRefreshing: false,
+        sessionRefreshTimer: null,
+        sessionRefreshInFlight: false,
         memoriesLoading: false,
         cacheLoading: false,
         messages: [],
         messagesBySession: {},
+        sessionWorkflowBySession: {},
         pendingSessions: {},
         pendingProgressBySession: {},
         pendingProgressStartedAtBySession: {},
@@ -147,6 +151,7 @@
         elements.logoutButton.addEventListener("click", onLogout);
         document.addEventListener("click", onDocumentClick);
         document.addEventListener("keydown", onDocumentKeydown);
+        document.addEventListener("visibilitychange", onVisibilityChange);
 
         setStatus("Session ready");
         await hydrateChatContext();
@@ -206,6 +211,7 @@
     }
 
     function showLogin() {
+        stopSessionRefreshLoop();
         elements.chatApp.hidden = true;
         elements.loginScreen.hidden = false;
         closeAccountMenu();
@@ -254,6 +260,13 @@
         }
     }
 
+    function onVisibilityChange() {
+        if (!document.hidden) {
+            refreshActiveSessionFromServer();
+        }
+        syncSessionRefreshLoop();
+    }
+
     async function onLogout() {
         if (hasPendingSessions()) {
             setStatus("Wait for responses", "warning");
@@ -261,6 +274,7 @@
             return;
         }
 
+        stopSessionRefreshLoop();
         try {
             await fetch(new URL("./api/chat/logout", window.location.href), {
                 method: "POST"
@@ -273,6 +287,7 @@
         state.sessionId = null;
         state.messages = [];
         state.messagesBySession = {};
+        state.sessionWorkflowBySession = {};
         state.pendingSessions = {};
         state.pendingProgressBySession = {};
         state.sessions = [];
@@ -641,6 +656,7 @@
             await deleteSessionFromMemory(targetSessionId);
             removeSessionLabel(targetSessionId);
             delete state.messagesBySession[targetSessionId];
+            delete state.sessionWorkflowBySession[targetSessionId];
             state.sessions = state.sessions.filter(function (savedSessionId) {
                 return savedSessionId !== targetSessionId;
             });
@@ -726,6 +742,7 @@
             summary: "Preparing the stock analysis request."
         });
 
+        let keepRequestPending = false;
         try {
             const clientRequestId = createClientRequestId();
             const response = await requestChatWithProgress(question, requestSessionId, clientRequestId);
@@ -766,20 +783,30 @@
                 setStatus("Response received");
             }
         } catch (error) {
-            appendSessionMessage(requestSessionId, {
-                role: "assistant",
-                variant: "error",
-                content: error.message,
-                timestamp: new Date().toISOString()
-            });
-            await hydrateChatContext();
-            renderIdentity();
-            if (requestSessionId === state.sessionId || !state.loading) {
-                setStatus("Request failed", "error");
+            if (isRequestAvailabilityError(error)) {
+                keepRequestPending = true;
+                markSessionWaitingForRecovery(requestSessionId);
+                if (requestSessionId === state.sessionId || !state.loading) {
+                    setStatus("Waiting for recovery", "warning");
+                }
+            } else {
+                appendSessionMessage(requestSessionId, {
+                    role: "assistant",
+                    variant: "error",
+                    content: error.message,
+                    timestamp: new Date().toISOString()
+                });
+                await hydrateChatContext();
+                renderIdentity();
+                if (requestSessionId === state.sessionId || !state.loading) {
+                    setStatus("Request failed", "error");
+                }
             }
         } finally {
-            setSessionLoading(requestSessionId, false);
-            clearSessionProgress(requestSessionId);
+            if (!keepRequestPending) {
+                setSessionLoading(requestSessionId, false);
+                clearSessionProgress(requestSessionId);
+            }
             if (requestSessionId === state.sessionId) {
                 elements.questionInput.focus();
             }
@@ -792,19 +819,26 @@
         }
 
         try {
-            return await requestChatStream(message, sessionId, clientRequestId, function (step) {
-                updateSessionProgress(sessionId, step);
-            });
+            return await requestChatStream(
+                message,
+                sessionId,
+                clientRequestId,
+                function (step) {
+                    updateSessionProgress(sessionId, step);
+                },
+                function (metadata) {
+                    applySessionWorkflowMetadata(sessionId, metadata);
+                }
+            );
         } catch (error) {
             if (error && error.fallbackToChat) {
-                clearSessionProgress(sessionId);
                 return requestChat(message, sessionId, clientRequestId);
             }
             throw error;
         }
     }
 
-    async function requestChatStream(message, sessionId, clientRequestId, onProgress) {
+    async function requestChatStream(message, sessionId, clientRequestId, onProgress, onWorkflow) {
         let response;
         try {
             response = await fetch(new URL("./api/chat/stream", window.location.href), {
@@ -859,7 +893,7 @@
             buffer = lines.pop() || "";
 
             for (const line of lines) {
-                const streamResponse = handleStreamLine(line, onProgress);
+                const streamResponse = handleStreamLine(line, onProgress, onWorkflow);
                 if (streamResponse) {
                     return streamResponse;
                 }
@@ -867,7 +901,7 @@
         }
 
         buffer += decoder.decode();
-        const streamResponse = handleStreamLine(buffer, onProgress);
+        const streamResponse = handleStreamLine(buffer, onProgress, onWorkflow);
         if (streamResponse) {
             return streamResponse;
         }
@@ -875,7 +909,7 @@
         throw createStreamingFallbackError();
     }
 
-    function handleStreamLine(line, onProgress) {
+    function handleStreamLine(line, onProgress, onWorkflow) {
         const trimmed = String(line || "").trim();
         if (!trimmed) {
             return null;
@@ -884,6 +918,10 @@
         const event = safeParseJson(trimmed);
         if (!event || typeof event !== "object") {
             return null;
+        }
+
+        if (event.metadata && typeof onWorkflow === "function") {
+            onWorkflow(event.metadata);
         }
 
         if (event.type === "progress" && event.step) {
@@ -912,6 +950,19 @@
         const error = new Error("Streaming unavailable.");
         error.fallbackToChat = true;
         return error;
+    }
+
+    function isRequestAvailabilityError(error) {
+        const message = error && typeof error.message === "string" ? error.message.trim() : "";
+        return error && (
+            error.fallbackToChat === true
+            || error.name === "TypeError"
+            || error.name === "NetworkError"
+            || message === "Load failed"
+            || message === "Failed to fetch"
+            || message.includes("NetworkError")
+            || message.includes("network")
+        );
     }
 
     async function requestChat(message, sessionId, clientRequestId) {
@@ -1398,6 +1449,7 @@
             }
             state.userId = body.userId || activeUserId();
             state.sessionId = body.sessionId || sessionId;
+            applySessionWorkflowMetadata(state.sessionId, body.metadata);
             setActiveSessionMessages(normalizeSessionMessages(body.messages));
             persistSessionId(state.sessionId);
             syncLoadingState();
@@ -1414,6 +1466,405 @@
             }
             renderMessages();
         }
+    }
+
+    async function refreshActiveSessionFromServer() {
+        if (!shouldRefreshActiveSession()) {
+            return;
+        }
+
+        const requestedSessionId = normalizeSessionValue(state.sessionId);
+        const requestedUserId = activeUserId();
+        state.sessionRefreshInFlight = true;
+
+        try {
+            const sessionUrl = new URL("./api/chat/session/" + encodeURIComponent(requestedSessionId), window.location.href);
+            const response = await fetch(sessionUrl);
+            if (!response.ok) {
+                handleUnauthorizedResponse(response);
+                return;
+            }
+
+            const body = safeParseJson(await response.text()) || {};
+            if (requestedUserId !== activeUserId() || requestedSessionId !== normalizeSessionValue(state.sessionId)) {
+                return;
+            }
+
+            const currentMessages = sessionMessages(requestedSessionId);
+            const nextMessages = normalizeSessionMessages(body.messages);
+            const workflowChanged = applySessionWorkflowMetadata(requestedSessionId, body.metadata);
+            if (nextMessages.length === 0 && currentMessages.length > 0) {
+                return;
+            }
+            const messagesChanged = messageListSignature(currentMessages) !== messageListSignature(nextMessages);
+            if (!workflowChanged && !messagesChanged) {
+                return;
+            }
+
+            state.userId = body.userId || activeUserId();
+            state.sessionId = normalizeSessionValue(body.sessionId) || requestedSessionId;
+            if (messagesChanged) {
+                setActiveSessionMessages(nextMessages);
+            }
+            persistSessionId(state.sessionId);
+            syncLoadingState();
+            renderIdentity();
+            renderSessions();
+            renderMessages();
+            refreshSessions(true, false);
+            if (messagesChanged) {
+                setStatus("Session updated");
+            } else if (isSessionPending(state.sessionId)) {
+                setStatus("Recovering workflow");
+            }
+        } catch (error) {
+            // Keep polling silent. Recovery can complete on a later interval.
+        } finally {
+            state.sessionRefreshInFlight = false;
+        }
+    }
+
+    function shouldRefreshActiveSession() {
+        if (!isLoggedIn() || !isSessionManagementEnabled()) {
+            return false;
+        }
+        if (elements.chatApp.hidden || document.hidden) {
+            return false;
+        }
+        if (state.sessionRefreshInFlight) {
+            return false;
+        }
+        return Boolean(normalizeSessionValue(state.sessionId));
+    }
+
+    function messageListSignature(messages) {
+        const list = Array.isArray(messages) ? messages : [];
+        return JSON.stringify(list.map(function (message) {
+            return {
+                role: message && message.role,
+                content: message && message.content,
+                steps: stepListSignature(message && message.executionSteps),
+                tokenUsage: tokenUsageSignature(message && message.tokenUsage)
+            };
+        }));
+    }
+
+    function stepListSignature(steps) {
+        if (!Array.isArray(steps)) {
+            return [];
+        }
+
+        return steps.map(function (step) {
+            return [
+                step && step.id,
+                step && step.status,
+                step && step.summary,
+                step && step.durationMs,
+                step && step.recovered
+            ];
+        });
+    }
+
+    function tokenUsageSignature(tokenUsage) {
+        if (!tokenUsage || typeof tokenUsage !== "object") {
+            return null;
+        }
+
+        return {
+            promptTokens: tokenUsage.promptTokens,
+            completionTokens: tokenUsage.completionTokens,
+            totalTokens: tokenUsage.totalTokens
+        };
+    }
+
+    function applySessionWorkflowMetadata(sessionId, metadata) {
+        const targetSessionId = normalizeSessionValue(sessionId);
+        if (!targetSessionId) {
+            return false;
+        }
+
+        const nextWorkflow = normalizeSessionWorkflow(metadata);
+        const previousWorkflow = state.sessionWorkflowBySession[targetSessionId] || null;
+        const changed = workflowSignature(previousWorkflow) !== workflowSignature(nextWorkflow);
+        if (nextWorkflow) {
+            state.sessionWorkflowBySession[targetSessionId] = nextWorkflow;
+        } else {
+            delete state.sessionWorkflowBySession[targetSessionId];
+        }
+
+        if (nextWorkflow && isWorkflowActive(nextWorkflow.status)) {
+            setRecoverySessionLoading(targetSessionId, nextWorkflow);
+        } else {
+            clearRecoverySessionLoading(targetSessionId);
+        }
+
+        return changed;
+    }
+
+    function normalizeSessionWorkflow(metadata) {
+        if (!metadata || typeof metadata !== "object") {
+            return null;
+        }
+
+        const workflowId = cleanProgressText(metadata.latestWorkflowId);
+        const status = cleanProgressText(metadata.latestWorkflowStatus).toUpperCase();
+        if (!workflowId || !status) {
+            return null;
+        }
+
+        return {
+            workflowId: workflowId,
+            status: status,
+            recoveredFromWorkflowId: cleanProgressText(metadata.recoveredFromWorkflowId),
+            replayCheckpointId: cleanProgressText(metadata.replayCheckpointId),
+            steps: normalizeWorkflowSteps(metadata.latestWorkflowSteps, metadata)
+        };
+    }
+
+    function workflowSignature(workflow) {
+        if (!workflow) {
+            return "";
+        }
+        return JSON.stringify({
+            workflowId: workflow.workflowId,
+            status: workflow.status,
+            recoveredFromWorkflowId: workflow.recoveredFromWorkflowId,
+            replayCheckpointId: workflow.replayCheckpointId,
+            steps: stepListSignature(workflow.steps)
+        });
+    }
+
+    function isWorkflowActive(status) {
+        return status === "RUNNING" || status === "RECOVERING";
+    }
+
+    function setRecoverySessionLoading(sessionId, workflow) {
+        state.pendingSessions[sessionId] = true;
+        const steps = workflow.steps.length > 0 ? workflow.steps : [recoveryFallbackStep(workflow)];
+        setSessionProgress(sessionId, steps);
+        syncLoadingState();
+        renderSessions();
+    }
+
+    function normalizeWorkflowSteps(steps, metadata) {
+        if (!Array.isArray(steps)) {
+            return [];
+        }
+
+        const recoveredFromWorkflowId = cleanProgressText(metadata && metadata.recoveredFromWorkflowId);
+        const replayCheckpointId = cleanProgressText(metadata && metadata.replayCheckpointId);
+        const checkpointStepId = checkpointedStepId(replayCheckpointId);
+        let inferRecovered = Boolean(
+            recoveredFromWorkflowId
+            && checkpointStepId
+            && containsCheckpointBoundary(steps, checkpointStepId)
+        );
+        let allowCheckpointEvent = false;
+
+        return steps.map(function (step) {
+            const normalizedStep = normalizeProgressStep({
+                id: step && step.id,
+                label: step && step.label,
+                kind: step && step.kind,
+                actorType: step && step.actorType,
+                actorName: step && step.actorName,
+                status: step && step.status,
+                summary: step && step.summary,
+                durationMs: step && step.durationMs,
+                recovered: step && step.recovered
+            });
+
+            if (!normalizedStep) {
+                return null;
+            }
+
+            const inferredRecovered = inferRecoveredForStep(normalizedStep, checkpointStepId, {
+                inferRecovered: inferRecovered,
+                allowCheckpointEvent: allowCheckpointEvent
+            });
+            inferRecovered = inferredRecovered.inferRecovered;
+            allowCheckpointEvent = inferredRecovered.allowCheckpointEvent;
+
+            if (inferredRecovered.recovered) {
+                return Object.assign({}, normalizedStep, { recovered: true });
+            }
+
+            return normalizedStep;
+        }).filter(Boolean);
+    }
+
+    function inferRecoveredForStep(step, checkpointStepId, stateValue) {
+        if (!stateValue.inferRecovered) {
+            return {
+                recovered: false,
+                inferRecovered: false,
+                allowCheckpointEvent: false
+            };
+        }
+
+        if (stateValue.allowCheckpointEvent) {
+            if (isCheckpointForStep(step, checkpointStepId)) {
+                return {
+                    recovered: true,
+                    inferRecovered: false,
+                    allowCheckpointEvent: false
+                };
+            }
+            return {
+                recovered: false,
+                inferRecovered: false,
+                allowCheckpointEvent: false
+            };
+        }
+
+        if (isCheckpointForStep(step, checkpointStepId)) {
+            return {
+                recovered: true,
+                inferRecovered: false,
+                allowCheckpointEvent: false
+            };
+        }
+
+        if (step.id === checkpointStepId && step.status === "completed") {
+            return {
+                recovered: true,
+                inferRecovered: true,
+                allowCheckpointEvent: true
+            };
+        }
+
+        return {
+            recovered: true,
+            inferRecovered: true,
+            allowCheckpointEvent: false
+        };
+    }
+
+    function checkpointedStepId(checkpointId) {
+        const value = cleanProgressText(checkpointId);
+        if (!value) {
+            return "";
+        }
+
+        const lastSeparator = value.lastIndexOf(":");
+        if (lastSeparator < 0) {
+            return value;
+        }
+
+        const actorSeparator = value.lastIndexOf(":", lastSeparator - 1);
+        if (actorSeparator < 0) {
+            return value;
+        }
+
+        return value.slice(0, actorSeparator);
+    }
+
+    function containsCheckpointBoundary(steps, checkpointStepId) {
+        return steps.some(function (step) {
+            return isCheckpointBoundaryStep({
+                id: cleanProgressText(step && step.id),
+                kind: cleanProgressText(step && step.kind),
+                status: normalizeProgressStatus(step && step.status),
+                summary: cleanProgressText(step && step.summary)
+            }, checkpointStepId);
+        });
+    }
+
+    function isCheckpointForStep(step, checkpointStepId) {
+        if (!step || !checkpointStepId) {
+            return false;
+        }
+        return isCheckpointBoundaryStep(step, checkpointStepId) && step.kind === "checkpoint";
+    }
+
+    function isCheckpointBoundaryStep(step, checkpointStepId) {
+        if (!step || !checkpointStepId) {
+            return false;
+        }
+        if (step.id === checkpointStepId) {
+            return step.status === "completed";
+        }
+        if (step.id === "checkpoint:" + checkpointStepId) {
+            return true;
+        }
+        return step.kind === "checkpoint" && cleanProgressText(step.summary).includes(checkpointStepId);
+    }
+
+    function recoveryFallbackStep(workflow) {
+        return normalizeProgressStep({
+            id: "WORKFLOW_RECOVERY",
+            label: "Recovering workflow",
+            kind: "system",
+            actorType: "system",
+            actorName: "system",
+            status: "running",
+            summary: "Recovering workflow " + workflow.workflowId + " from Redis state."
+        });
+    }
+
+    function setSessionProgress(sessionId, steps) {
+        const targetSessionId = normalizeSessionValue(sessionId);
+        if (!targetSessionId) {
+            return;
+        }
+
+        ensureSessionProgressStarted(targetSessionId);
+        const currentSteps = sessionProgress(targetSessionId);
+        const currentByKey = new Map();
+        currentSteps.forEach(function (step) {
+            const key = progressStepKey(step);
+            if (key) {
+                currentByKey.set(key, step);
+            }
+        });
+        const now = Date.now();
+        const nextKeys = new Set();
+        const recoveredStepIds = new Set();
+        steps.forEach(function (step) {
+            if (step && step.recovered === true && step.id) {
+                recoveredStepIds.add(step.id);
+            }
+        });
+        const nextSteps = steps.map(function (step) {
+            const key = progressStepKey(step);
+            const existingStep = currentByKey.get(key);
+            if (key) {
+                nextKeys.add(key);
+            }
+            return Object.assign({}, step, {
+                startedAt: existingStep && Number.isFinite(existingStep.startedAt) ? existingStep.startedAt : now,
+                updatedAt: now
+            });
+        });
+        currentSteps.forEach(function (step) {
+            const key = progressStepKey(step);
+            if (!key || nextKeys.has(key)) {
+                return;
+            }
+            if (step.recovered !== true && recoveredStepIds.has(step.id)) {
+                return;
+            }
+            if (step.id === "WORKFLOW_RECOVERY" && steps.length > 0) {
+                return;
+            }
+            if (step.id === "REQUEST_WAITING_FOR_RECOVERY" && steps.length > 0) {
+                return;
+            }
+            nextSteps.push(step);
+        });
+
+        state.pendingProgressBySession[targetSessionId] = nextSteps;
+
+        if (targetSessionId === state.sessionId) {
+            renderMessages();
+        }
+    }
+
+    function clearRecoverySessionLoading(sessionId) {
+        delete state.pendingSessions[sessionId];
+        clearSessionProgress(sessionId);
+        syncLoadingState();
+        renderSessions();
     }
 
     function appendMessage(message) {
@@ -1455,6 +1906,7 @@
     }
 
     function renderMessages() {
+        const stickToBottom = shouldStickToBottom();
         elements.messages.replaceChildren();
 
         if (state.messages.length === 0) {
@@ -1470,7 +1922,9 @@
             elements.messages.appendChild(buildTypingIndicator(sessionProgress(state.sessionId), state.sessionId));
         }
 
-        scrollMessagesToBottom();
+        if (stickToBottom) {
+            scrollMessagesToBottom();
+        }
     }
 
     function renderIdentity() {
@@ -2000,6 +2454,7 @@
         if (!enabled) {
             closeMobileSessions();
         }
+        syncSessionRefreshLoop();
     }
 
     function handleUnauthorizedResponse(response) {
@@ -2007,10 +2462,12 @@
             return false;
         }
 
+        stopSessionRefreshLoop();
         state.userId = null;
         state.sessionId = null;
         state.messages = [];
         state.messagesBySession = {};
+        state.sessionWorkflowBySession = {};
         state.pendingSessions = {};
         state.pendingProgressBySession = {};
         state.sessions = [];
@@ -2025,6 +2482,30 @@
         clearStoredSession();
         showLogin();
         return true;
+    }
+
+    function syncSessionRefreshLoop() {
+        if (isLoggedIn() && isSessionManagementEnabled() && !elements.chatApp.hidden && !document.hidden) {
+            startSessionRefreshLoop();
+        } else {
+            stopSessionRefreshLoop();
+        }
+    }
+
+    function startSessionRefreshLoop() {
+        if (state.sessionRefreshTimer) {
+            return;
+        }
+
+        state.sessionRefreshTimer = window.setInterval(refreshActiveSessionFromServer, sessionRefreshIntervalMs);
+    }
+
+    function stopSessionRefreshLoop() {
+        if (state.sessionRefreshTimer) {
+            window.clearInterval(state.sessionRefreshTimer);
+            state.sessionRefreshTimer = null;
+        }
+        state.sessionRefreshInFlight = false;
     }
 
     function activeRetrievedMemoriesLimit() {
@@ -2678,6 +3159,11 @@
         const steps = Array.isArray(progressSteps) ? progressSteps : [];
         if (steps.length > 0) {
             const visibleSteps = visibleProgressSteps(steps);
+            const workflow = state.sessionWorkflowBySession[normalizeSessionValue(sessionId)] || null;
+            const workflowBadges = workflow ? buildWorkflowBadges(workflow) : null;
+            if (workflowBadges) {
+                content.appendChild(workflowBadges);
+            }
             content.appendChild(buildLiveActivityHeadline(visibleSteps));
             content.appendChild(buildLiveActivityList(visibleSteps));
         } else {
@@ -2689,6 +3175,25 @@
         article.appendChild(content);
 
         return article;
+    }
+
+    function buildWorkflowBadges(workflow) {
+        const wrapper = document.createElement("div");
+        wrapper.className = "workflow-badges";
+
+        const recoveredFrom = cleanProgressText(workflow && workflow.recoveredFromWorkflowId);
+        if (recoveredFrom) {
+            appendWorkflowBadge(wrapper, "Recovered from: " + recoveredFrom, "source");
+        }
+
+        return wrapper.hasChildNodes() ? wrapper : null;
+    }
+
+    function appendWorkflowBadge(wrapper, label, variant) {
+        const badge = document.createElement("span");
+        badge.className = "workflow-badge workflow-badge--" + variant;
+        badge.textContent = label;
+        wrapper.appendChild(badge);
     }
 
     function buildLiveActivityHeadline(steps) {
@@ -2717,20 +3222,28 @@
     function buildLiveActivityList(steps) {
         const list = document.createElement("ol");
         list.className = "live-activity-list";
-
         steps.forEach(function (step) {
             const item = document.createElement("li");
             item.className = "live-activity-list__item live-activity-list__item--" + normalizeProgressStatus(step.status);
 
+            const labelRow = document.createElement("span");
+            labelRow.className = "live-activity-list__label-row";
+
             const label = document.createElement("span");
             label.className = "live-activity-list__label";
             label.textContent = cleanProgressText(step.label) || cleanProgressText(step.id) || "Working";
+            labelRow.appendChild(label);
+
+            const stepBadges = buildStepBadges(step);
+            if (stepBadges) {
+                labelRow.appendChild(stepBadges);
+            }
 
             const meta = document.createElement("span");
             meta.className = "live-activity-list__meta";
             meta.textContent = formatLiveActivityMeta(step);
 
-            item.append(label, meta);
+            item.append(labelRow, meta);
 
             const summary = cleanProgressText(step.summary);
             if (summary) {
@@ -2754,6 +3267,20 @@
         return list;
     }
 
+    function buildStepBadges(step) {
+        if (!step || step.recovered !== true) {
+            return null;
+        }
+
+        const wrapper = document.createElement("span");
+        wrapper.className = "step-badges";
+        const element = document.createElement("span");
+        element.className = "step-badge step-badge--source";
+        element.textContent = "Recovered";
+        wrapper.appendChild(element);
+        return wrapper;
+    }
+
     function updateSessionProgress(sessionId, step) {
         const targetSessionId = normalizeSessionValue(sessionId);
         const progressStep = normalizeProgressStep(step);
@@ -2764,8 +3291,9 @@
         ensureSessionProgressStarted(targetSessionId);
         const currentSteps = sessionProgress(targetSessionId);
         const nextSteps = currentSteps.slice();
+        const progressKey = progressStepKey(progressStep);
         const existingIndex = nextSteps.findIndex(function (currentStep) {
-            return currentStep.id === progressStep.id;
+            return progressStepKey(currentStep) === progressKey;
         });
         const now = Date.now();
         const existingStep = existingIndex >= 0 ? nextSteps[existingIndex] : null;
@@ -2785,6 +3313,13 @@
             setStatus(progressStep.label || "Analyzing");
             renderMessages();
         }
+    }
+
+    function progressStepKey(step) {
+        if (!step || !step.id) {
+            return "";
+        }
+        return step.id + "::" + (step.recovered === true ? "recovered" : "live");
     }
 
     function clearSessionProgress(sessionId) {
@@ -2819,17 +3354,19 @@
     }
 
     function mergeActivitySteps(activitySteps, fallbackSteps) {
-        const fallbackById = new Map();
+        const fallbackByKey = new Map();
         fallbackSteps.forEach(function (step) {
-            if (step && step.id) {
-                fallbackById.set(step.id, step);
+            const key = progressStepKey(step);
+            if (key) {
+                fallbackByKey.set(key, step);
             }
         });
 
         const seen = new Set();
         const merged = activitySteps.map(function (step) {
-            const fallback = fallbackById.get(step.id);
-            seen.add(step.id);
+            const key = progressStepKey(step);
+            const fallback = fallbackByKey.get(key);
+            seen.add(key);
             if (!fallback) {
                 return step;
             }
@@ -2843,7 +3380,8 @@
         });
 
         fallbackSteps.forEach(function (step) {
-            if (step && step.id && !seen.has(step.id)) {
+            const key = progressStepKey(step);
+            if (key && !seen.has(key)) {
                 merged.push(step);
             }
         });
@@ -2882,6 +3420,7 @@
                 status: step.status,
                 summary: step.summary,
                 durationMs: step.durationMs,
+                recovered: step.recovered === true,
                 tokenUsage: step.tokenUsage,
                 dataAccesses: resolveDataAccesses(step)
             };
@@ -2907,6 +3446,7 @@
             status: normalizeProgressStatus(step.status),
             summary: cleanProgressText(step.summary),
             durationMs: Number.isFinite(step.durationMs) ? step.durationMs : null,
+            recovered: step.recovered === true,
             tokenUsage: resolveTokenUsage(step),
             dataAccesses: resolveDataAccesses(step)
         };
@@ -2940,7 +3480,7 @@
     function visibleProgressSteps(steps) {
         const progressSteps = Array.isArray(steps) ? steps : [];
         const detailedSteps = progressSteps.filter(function (step) {
-            return step && step.id !== "REQUEST_ANALYSIS";
+            return step && step.id !== "REQUEST_ANALYSIS" && step.id !== "WORKFLOW_START";
         });
 
         return detailedSteps.length > 0 ? detailedSteps : progressSteps;
@@ -2998,6 +3538,27 @@
 
         syncLoadingState();
         renderMessages();
+        renderSessions();
+    }
+
+    function markSessionWaitingForRecovery(sessionId) {
+        const targetSessionId = normalizeSessionValue(sessionId);
+        if (!targetSessionId) {
+            return;
+        }
+
+        state.pendingSessions[targetSessionId] = true;
+        ensureSessionProgressStarted(targetSessionId);
+        updateSessionProgress(targetSessionId, {
+            id: "REQUEST_WAITING_FOR_RECOVERY",
+            label: "Waiting for backend",
+            kind: "system",
+            actorType: "system",
+            actorName: "system",
+            status: "running",
+            summary: "The application stopped responding. Keep this request open. Redis recovery should resume it within a minute."
+        });
+        syncLoadingState();
         renderSessions();
     }
 
@@ -3086,6 +3647,13 @@
         window.requestAnimationFrame(() => {
             elements.messages.scrollTop = elements.messages.scrollHeight;
         });
+    }
+
+    function shouldStickToBottom() {
+        const remaining = elements.messages.scrollHeight
+            - elements.messages.scrollTop
+            - elements.messages.clientHeight;
+        return remaining < 96;
     }
 
     function extractErrorMessage(body, rawBody, status) {

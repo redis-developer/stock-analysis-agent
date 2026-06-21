@@ -2,6 +2,7 @@ package com.redis.stockanalysisagent.agent.coordinator;
 
 import com.redis.stockanalysisagent.agent.AgentExecution;
 import com.redis.stockanalysisagent.agent.TokenUsageSummary;
+import com.redis.stockanalysisagent.chat.ChatProgressMetadata;
 import com.redis.stockanalysisagent.chat.ChatProgressPublisher;
 import com.redis.stockanalysisagent.memory.LongTermMemoryAdvisor;
 import com.redis.stockanalysisagent.semanticcache.SemanticAnalysisCache;
@@ -46,7 +47,7 @@ public class CoordinatorAgent {
             boolean semanticCachingEnabled,
             String semanticCacheKey
     ) {
-        coordinatorAgentTools.startTrace();
+        coordinatorAgentTools.startTrace(userMessage);
         long startedAt = System.nanoTime();
         progressPublisher.running(
                 "COORDINATOR",
@@ -54,7 +55,14 @@ public class CoordinatorAgent {
                 ChatProgressPublisher.KIND_AGENT,
                 "Routing the request and deciding which specialist agents to run.",
                 ChatProgressPublisher.ACTOR_TYPE_COORDINATOR,
-                ChatProgressPublisher.ACTOR_COORDINATOR
+                ChatProgressPublisher.ACTOR_COORDINATOR,
+                ChatProgressMetadata.input(userMessage)
+        );
+        log.info(
+                "coordinator_started conversationId={} semanticCachingEnabled={} retrievedMemoriesLimit={}",
+                conversationId,
+                semanticCachingEnabled,
+                retrievedMemoriesLimit
         );
         try {
             ResponseEntity<ChatResponse, CoordinatorResponse> response = coordinatorChatClient
@@ -114,10 +122,30 @@ public class CoordinatorAgent {
                     coordinatorProgressSummary(cacheHit, guardrailHit, agentExecutions),
                     result.tokenUsage(),
                     ChatProgressPublisher.ACTOR_TYPE_COORDINATOR,
-                    ChatProgressPublisher.ACTOR_COORDINATOR
+                    ChatProgressPublisher.ACTOR_COORDINATOR,
+                    ChatProgressMetadata.payload(
+                            userMessage,
+                            coordinatorOutputPayload(coordinatorResponse, agentExecutions, cacheHit, guardrailHit)
+                    )
+            );
+            log.info(
+                    "coordinator_completed conversationId={} durationMs={} specialistCalls={} cacheHit={} guardrailHit={} tokenUsage={}",
+                    conversationId,
+                    elapsedDurationMs(startedAt),
+                    agentExecutions.size(),
+                    cacheHit,
+                    guardrailHit,
+                    result.tokenUsage()
             );
             return result;
         } catch (RuntimeException ex) {
+            log.warn(
+                    "coordinator_failed conversationId={} durationMs={} error={}",
+                    conversationId,
+                    elapsedDurationMs(startedAt),
+                    ex.getClass().getSimpleName(),
+                    ex
+            );
             progressPublisher.failed(
                     "COORDINATOR",
                     "Calling coordinator",
@@ -125,7 +153,8 @@ public class CoordinatorAgent {
                     elapsedDurationMs(startedAt),
                     errorMessage(ex),
                     ChatProgressPublisher.ACTOR_TYPE_COORDINATOR,
-                    ChatProgressPublisher.ACTOR_COORDINATOR
+                    ChatProgressPublisher.ACTOR_COORDINATOR,
+                    ChatProgressMetadata.input(userMessage)
             );
             throw ex;
         } finally {
@@ -154,6 +183,47 @@ public class CoordinatorAgent {
         return agentCount == 1
                 ? "Completed after 1 specialist agent call."
                 : "Completed after %d specialist agent calls.".formatted(agentCount);
+    }
+
+    private String coordinatorOutputPayload(
+            CoordinatorResponse response,
+            List<AgentExecution> agentExecutions,
+            boolean cacheHit,
+            boolean guardrailHit
+    ) {
+        StringBuilder payload = new StringBuilder();
+        appendLine(payload, "response", response.getResponse());
+        appendLine(payload, "conversationId", response.getConversationId());
+        appendLine(payload, "resolvedQuestion", response.getResolvedQuestion());
+        appendLine(payload, "resolvedTicker", response.getResolvedTicker());
+        if (response.getResolvedTickers() != null && !response.getResolvedTickers().isEmpty()) {
+            appendLine(payload, "resolvedTickers", String.join(", ", response.getResolvedTickers()));
+        }
+        if (response.getSelectedAgents() != null && !response.getSelectedAgents().isEmpty()) {
+            appendLine(payload, "selectedAgents", response.getSelectedAgents().toString());
+        }
+        appendLine(payload, "reasoning", response.getReasoning());
+        appendLine(payload, "semanticCacheHit", Boolean.toString(cacheHit));
+        appendLine(payload, "semanticGuardrailHit", Boolean.toString(guardrailHit));
+        if (agentExecutions != null && !agentExecutions.isEmpty()) {
+            payload.append("specialistResults:\n");
+            for (AgentExecution execution : agentExecutions) {
+                payload.append("- ")
+                        .append(execution.agentType())
+                        .append(execution.ticker() == null || execution.ticker().isBlank() ? "" : " " + execution.ticker())
+                        .append(": ")
+                        .append(execution.summary())
+                        .append('\n');
+            }
+        }
+        return payload.toString().trim();
+    }
+
+    private void appendLine(StringBuilder payload, String label, String value) {
+        if (value == null || value.isBlank()) {
+            return;
+        }
+        payload.append(label).append(": ").append(value).append('\n');
     }
 
     private String errorMessage(RuntimeException ex) {

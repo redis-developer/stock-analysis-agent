@@ -156,12 +156,62 @@ class CoordinatorAgentToolsTests {
         }
     }
 
+    @Test
+    void runSynthesisAgentUsesRecoveredEvidenceFromReplayMessage() {
+        String question = "Give me a full view on NVIDIA.";
+        when(synthesisAgent.execute(
+                eq(question),
+                eq(List.of("NVDA")),
+                argThat(this::containsRecoveredNvidiaEvidence)
+        )).thenReturn(SynthesisResult.completed("Synthesized recovered NVDA evidence.", "Full NVIDIA analysis."));
+
+        tools.startTrace("""
+                Continue this stock analysis workflow from the latest Redis checkpoint.
+
+                Recovered evidence:
+                Specialist evidence: fundamentals
+                Step: FUNDAMENTALS:NVDA
+                Actor: fundamentals
+                Input: agent: FUNDAMENTALS
+                ticker: NVDA
+                Output: NVIDIA reported revenue of $215.94 billion and strong margins.
+
+                Tool evidence: getTechnicalAnalysisSnapshot
+                Step: tool:getTechnicalAnalysisSnapshot:6
+                Actor: technical_analysis
+                Input: {"ticker":"NVDA"}
+                Output: RSI is 50.45 and the trend signal is neutral.
+
+                Checkpoint summary:
+                Created checkpoint for tool:runFundamentalsAgent:3.
+                """);
+        try {
+            CoordinatorAgentTools.AgentToolResult result = tools.runSynthesisAgent("NVDA", question);
+
+            assertThat(result.status()).isEqualTo("COMPLETED");
+            assertThat(result.finalResponse()).isEqualTo("Full NVIDIA analysis.");
+            verify(synthesisAgent).execute(
+                    eq(question),
+                    eq(List.of("NVDA")),
+                    argThat(this::containsRecoveredNvidiaEvidence)
+            );
+        } finally {
+            tools.clearTrace();
+        }
+    }
+
     private boolean containsAppleEvidence(SynthesisEvidence evidence) {
         return evidence != null
                 && evidence.marketData().containsKey("AAPL")
                 && evidence.fundamentals().containsKey("AAPL")
                 && evidence.news().containsKey("AAPL")
                 && evidence.technicalAnalysis().containsKey("AAPL");
+    }
+
+    private boolean containsRecoveredNvidiaEvidence(SynthesisEvidence evidence) {
+        return evidence != null
+                && String.valueOf(evidence.fundamentals().get("NVDA")).contains("215.94")
+                && String.valueOf(evidence.technicalAnalysis().get("NVDA")).contains("50.45");
     }
 
     private MarketSnapshot marketSnapshot() {

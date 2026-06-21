@@ -2,6 +2,7 @@ package com.redis.stockanalysisagent.memory;
 
 import com.redis.agentmemory.models.longtermemory.MemoryRecordResults;
 import com.redis.stockanalysisagent.chat.ChatProgressPublisher;
+import com.redis.stockanalysisagent.chat.ChatProgressMetadata;
 import com.redis.stockanalysisagent.memory.service.AgentMemoryService;
 import com.redis.stockanalysisagent.session.ChatSessionAccess;
 import com.redis.stockanalysisagent.session.ConversationId;
@@ -87,18 +88,25 @@ public class LongTermMemoryAdvisor implements BaseAdvisor {
                 "MEMORY_RETRIEVAL",
                 "Memory retrieval",
                 ChatProgressPublisher.KIND_SYSTEM,
-                "Searching long term memory."
+                "Searching long term memory.",
+                ChatProgressPublisher.ACTOR_TYPE_SYSTEM,
+                ChatProgressPublisher.ACTOR_SYSTEM,
+                ChatProgressMetadata.input(userMessage)
         );
         List<String> memories = searchMemories(userMessage, userId, maxMemories);
         long durationMs = elapsedDurationMs(retrievalStartedAt);
         memoryRepository.setLastMemoryRetrievalDurationMs(durationMs);
         memoryRepository.setLastRetrievedMemories(memories);
+        String outputPayload = memoryOutputPayload(userMessage, memories);
         progressPublisher.completed(
                 "MEMORY_RETRIEVAL",
                 "Memory retrieval",
                 ChatProgressPublisher.KIND_SYSTEM,
                 durationMs,
-                memoryProgressSummary(memories)
+                memoryProgressSummary(memories),
+                ChatProgressPublisher.ACTOR_TYPE_SYSTEM,
+                ChatProgressPublisher.ACTOR_SYSTEM,
+                ChatProgressMetadata.payload(userMessage, outputPayload)
         );
 
         if (memories.isEmpty()) {
@@ -162,6 +170,13 @@ public class LongTermMemoryAdvisor implements BaseAdvisor {
         return memoryCount == 1
                 ? "Retrieved 1 long term memory."
                 : "Retrieved %d long term memories.".formatted(memoryCount);
+    }
+
+    private String memoryOutputPayload(String userMessage, List<String> memories) {
+        if (memories == null || memories.isEmpty()) {
+            return "No matching long term memories found.";
+        }
+        return augmentUserMessage(userMessage, memories);
     }
 
     private String augmentUserMessage(String userMessageText, List<String> memories) {

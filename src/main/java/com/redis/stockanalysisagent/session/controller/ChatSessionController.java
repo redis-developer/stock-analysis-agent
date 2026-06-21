@@ -10,6 +10,8 @@ import com.redis.stockanalysisagent.session.dto.ChatSessionSummary;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
 import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -29,6 +31,8 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/chat")
 public class ChatSessionController {
+
+    private static final Logger log = LoggerFactory.getLogger(ChatSessionController.class);
 
     private final ChatSessionService chatSessionService;
     private final ChatSessionAccess sessionAccess;
@@ -120,6 +124,7 @@ public class ChatSessionController {
                 sessionAccess.normalizeRateLimitingEnabled(request.rateLimitingEnabled())
         );
         sessionAccess.clearCachedChatSessions(session);
+        log.info("chat_login userId={} httpSessionId={}", userId, session.getId());
         return ResponseEntity.ok(contextResponse(session));
     }
 
@@ -224,6 +229,7 @@ public class ChatSessionController {
     public ResponseEntity<Void> logout(HttpServletRequest httpRequest) {
         HttpSession session = httpRequest.getSession(false);
         if (session != null) {
+            log.info("chat_logout httpSessionId={} userId={}", session.getId(), sessionAccess.sessionUserId(session));
             session.invalidate();
         }
         return ResponseEntity.noContent().build();

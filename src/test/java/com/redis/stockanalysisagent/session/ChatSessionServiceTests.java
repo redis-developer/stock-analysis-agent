@@ -4,6 +4,9 @@ import com.redis.agentmemory.models.workingmemory.MemoryMessage;
 import com.redis.stockanalysisagent.memory.AmsChatMemoryRepository;
 import com.redis.stockanalysisagent.memory.AmsChatMemoryRepository.StoredMemoryMessage;
 import com.redis.stockanalysisagent.session.dto.ChatSessionMessage;
+import com.redis.stockanalysisagent.workflow.WorkflowMetadata;
+import com.redis.stockanalysisagent.workflow.WorkflowService;
+import com.redis.stockanalysisagent.workflow.WorkflowStatus;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.memory.ChatMemory;
 
@@ -130,6 +133,154 @@ class ChatSessionServiceTests {
                     assertThat(summary.metadata().tickers()).containsExactly("AAPL", "MSFT", "NVDA");
                     assertThat(summary.metadata().triggeredAgents())
                             .containsExactly("MARKET_DATA", "NEWS", "SYNTHESIS");
+                });
+    }
+
+    @Test
+    void sessionMetadataIncludesLatestWorkflowState() {
+        WorkflowService workflowService = mock(WorkflowService.class);
+        ChatSessionService service = new ChatSessionService(chatMemory, memoryRepository, workflowService);
+        WorkflowMetadata workflow = new WorkflowMetadata(
+                "workflow-2",
+                null,
+                "alice",
+                "session-1",
+                "alice:session-1",
+                WorkflowStatus.RECOVERING,
+                "workflow-1",
+                2,
+                "owner-1",
+                null,
+                1L,
+                1,
+                null,
+                null,
+                null,
+                null
+        );
+        when(memoryRepository.findStoredMessagesByConversationId("alice:session-1")).thenReturn(List.of());
+        when(workflowService.sessionWorkflowIds("session-1")).thenReturn(List.of("workflow-1", "workflow-2"));
+        when(workflowService.readWorkflow("workflow-2")).thenReturn(workflow);
+        when(workflowService.workflowFields("workflow-2")).thenReturn(Map.of(
+                "clientRequestId", "recovery:workflow-1:1:COORDINATOR",
+                WorkflowService.REPLAYED_FROM_WORKFLOW_ID, "workflow-1",
+                WorkflowService.REPLAY_CHECKPOINT_ID, "COORDINATOR:coordinator:1782048311457"
+        ));
+        when(workflowService.workflowEvents("workflow-1", 200)).thenReturn(List.of(
+                Map.of(
+                        "stepId", "SEMANTIC_CACHE",
+                        "kind", "system",
+                        "actorType", "system",
+                        "actorName", "system",
+                        "status", "completed",
+                        "summary", "No reusable response found in the semantic cache."
+                ),
+                Map.of(
+                        "stepId", "COORDINATOR",
+                        "kind", "agent",
+                        "actorType", "coordinator",
+                        "actorName", "coordinator",
+                        "status", "completed",
+                        "summary", "Completed after 1 specialist agent call."
+                )
+        ));
+        when(workflowService.workflowEvents("workflow-2", 200)).thenReturn(List.of(
+                Map.of(
+                        "stepId", "WORKFLOW_RECOVERY",
+                        "kind", "system",
+                        "actorType", "system",
+                        "actorName", "system",
+                        "status", "running",
+                        "summary", "Recovering workflow workflow-1 from Redis state."
+                ),
+                Map.of(
+                        "stepId", "tool:runMarketDataAgent:1",
+                        "kind", "tool",
+                        "actorType", "coordinator",
+                        "actorName", "coordinator",
+                        "status", "running",
+                        "toolName", "runMarketDataAgent",
+                        "summary", "Calling market data."
+                )
+        ));
+
+        assertThat(service.sessionMetadata("alice", "session-1"))
+                .satisfies(metadata -> {
+                    assertThat(metadata.latestWorkflowId()).isEqualTo("workflow-2");
+                    assertThat(metadata.latestWorkflowStatus()).isEqualTo("RECOVERING");
+                    assertThat(metadata.latestWorkflowMode()).isEqualTo("recovery");
+                    assertThat(metadata.recoveredFromWorkflowId()).isEqualTo("workflow-1");
+                    assertThat(metadata.replayCheckpointId()).isEqualTo("COORDINATOR:coordinator:1782048311457");
+                    assertThat(metadata.latestWorkflowSteps())
+                            .extracting("id")
+                            .containsExactly(
+                                    "SEMANTIC_CACHE",
+                                    "COORDINATOR",
+                                    "WORKFLOW_RECOVERY",
+                                    "tool:runMarketDataAgent:1"
+                            );
+                    assertThat(metadata.latestWorkflowSteps())
+                            .extracting("recovered")
+                            .containsExactly(true, true, false, false);
+                    assertThat(metadata.latestWorkflowSteps().get(3).label()).isEqualTo("Tool runMarketDataAgent");
+                });
+    }
+
+    @Test
+    void sessionMetadataMarksRecoveredStepsWhileOriginalWorkflowIsRecovering() {
+        WorkflowService workflowService = mock(WorkflowService.class);
+        ChatSessionService service = new ChatSessionService(chatMemory, memoryRepository, workflowService);
+        WorkflowMetadata workflow = new WorkflowMetadata(
+                "workflow-1",
+                null,
+                "alice",
+                "session-1",
+                "alice:session-1",
+                WorkflowStatus.RECOVERING,
+                null,
+                1,
+                "owner-1",
+                null,
+                2L,
+                2,
+                null,
+                null,
+                null,
+                null
+        );
+        when(memoryRepository.findStoredMessagesByConversationId("alice:session-1")).thenReturn(List.of());
+        when(workflowService.sessionWorkflowIds("session-1")).thenReturn(List.of("workflow-1"));
+        when(workflowService.readWorkflow("workflow-1")).thenReturn(workflow);
+        when(workflowService.workflowFields("workflow-1")).thenReturn(Map.of());
+        when(workflowService.workflowEvents("workflow-1", 200)).thenReturn(List.of(
+                Map.of(
+                        "stepId", "MEMORY_RETRIEVAL",
+                        "kind", "system",
+                        "actorType", "system",
+                        "actorName", "system",
+                        "status", "completed",
+                        "summary", "Retrieved memories."
+                ),
+                Map.of(
+                        "stepId", "checkpoint:COORDINATOR",
+                        "kind", "checkpoint",
+                        "actorType", "coordinator",
+                        "actorName", "coordinator",
+                        "status", "completed",
+                        "summary", "Created checkpoint for COORDINATOR.",
+                        "checkpointId", "COORDINATOR:coordinator:1782048311457"
+                )
+        ));
+
+        assertThat(service.sessionMetadata("alice", "session-1"))
+                .satisfies(metadata -> {
+                    assertThat(metadata.latestWorkflowId()).isEqualTo("workflow-1");
+                    assertThat(metadata.latestWorkflowStatus()).isEqualTo("RECOVERING");
+                    assertThat(metadata.recoveredFromWorkflowId()).isEqualTo("workflow-1");
+                    assertThat(metadata.replayCheckpointId()).isEqualTo("COORDINATOR:coordinator:1782048311457");
+                    assertThat(metadata.latestWorkflowSteps())
+                            .extracting("recovered")
+                            .containsExactly(true, true);
                 });
     }
 

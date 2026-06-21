@@ -9,31 +9,59 @@ import com.redis.stockanalysisagent.memory.AmsChatMemoryRepository.StoredMemoryM
 import com.redis.stockanalysisagent.session.dto.ChatSessionMetadata;
 import com.redis.stockanalysisagent.session.dto.ChatSessionMessage;
 import com.redis.stockanalysisagent.session.dto.ChatSessionSummary;
+import com.redis.stockanalysisagent.session.dto.ChatSessionWorkflowStep;
+import com.redis.stockanalysisagent.workflow.WorkflowMetadata;
+import com.redis.stockanalysisagent.workflow.WorkflowService;
+import com.redis.stockanalysisagent.workflow.WorkflowStatus;
 import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 @Service
 public class ChatSessionService {
 
     private static final ObjectMapper OBJECT_MAPPER = JsonMapper.builder().build();
+    private static final int LIVE_WORKFLOW_EVENT_LIMIT = 200;
 
     private final ChatMemory chatMemory;
     private final AmsChatMemoryRepository memoryRepository;
+    private final WorkflowService workflowService;
 
     public ChatSessionService(
             ChatMemory chatMemory,
             AmsChatMemoryRepository memoryRepository
     ) {
+        this(chatMemory, memoryRepository, (WorkflowService) null);
+    }
+
+    @Autowired
+    public ChatSessionService(
+            ChatMemory chatMemory,
+            AmsChatMemoryRepository memoryRepository,
+            ObjectProvider<WorkflowService> workflowService
+    ) {
+        this(chatMemory, memoryRepository, workflowService.getIfAvailable());
+    }
+
+    ChatSessionService(
+            ChatMemory chatMemory,
+            AmsChatMemoryRepository memoryRepository,
+            WorkflowService workflowService
+    ) {
         this.chatMemory = chatMemory;
         this.memoryRepository = memoryRepository;
+        this.workflowService = workflowService;
     }
 
     public void clearSession(String userId, String sessionId) {
@@ -81,7 +109,7 @@ public class ChatSessionService {
     }
 
     public ChatSessionMetadata sessionMetadata(String userId, String sessionId) {
-        return sessionMetadata(storedMessages(conversationId(userId, sessionId)));
+        return sessionMetadata(storedMessages(conversationId(userId, sessionId)), latestWorkflowState(sessionId));
     }
 
     private ChatSessionSummary summarizeSession(String userId, String sessionId) {
@@ -93,7 +121,7 @@ public class ChatSessionService {
                 .findFirst()
                 .orElseGet(() -> sessionCreatedAt(userId, sessionId));
 
-        return new ChatSessionSummary(sessionId, createdAt, sessionMetadata(storedMessages));
+        return new ChatSessionSummary(sessionId, createdAt, sessionMetadata(storedMessages, latestWorkflowState(sessionId)));
     }
 
     private String conversationId(String userId, String sessionId) {
@@ -155,9 +183,9 @@ public class ChatSessionService {
         return role != null ? new ChatSessionMessage(role, message.getContent(), timestamp) : null;
     }
 
-    private ChatSessionMetadata sessionMetadata(List<StoredMemoryMessage> messages) {
+    private ChatSessionMetadata sessionMetadata(List<StoredMemoryMessage> messages, WorkflowState latestWorkflow) {
         if (messages == null || messages.isEmpty()) {
-            return ChatSessionMetadata.empty();
+            return withWorkflowMetadata(ChatSessionMetadata.empty(), latestWorkflow);
         }
 
         LinkedHashSet<String> tickers = new LinkedHashSet<>();
@@ -170,7 +198,230 @@ public class ChatSessionService {
             addMetadataValues(triggeredAgents, message.metadata().get("triggeredAgents"));
         }
 
-        return new ChatSessionMetadata(List.copyOf(tickers), List.copyOf(triggeredAgents));
+        return withWorkflowMetadata(
+                new ChatSessionMetadata(List.copyOf(tickers), List.copyOf(triggeredAgents)),
+                latestWorkflow
+        );
+    }
+
+    private ChatSessionMetadata withWorkflowMetadata(
+            ChatSessionMetadata metadata,
+            WorkflowState latestWorkflow
+    ) {
+        if (latestWorkflow == null) {
+            return metadata;
+        }
+
+        WorkflowMetadata workflow = latestWorkflow.metadata();
+        Map<String, String> fields = latestWorkflow.fields();
+        return new ChatSessionMetadata(
+                metadata.tickers(),
+                metadata.triggeredAgents(),
+                workflow.workflowId(),
+                workflow.status().name(),
+                workflowMode(fields),
+                latestWorkflow.recoveredFromWorkflowId(),
+                latestWorkflow.replayCheckpointId(),
+                blankToNull(fields.get(WorkflowService.RECOVERED_BY_WORKFLOW_ID)),
+                blankToNull(fields.get("failureReason")),
+                latestWorkflow.steps()
+        );
+    }
+
+    private WorkflowState latestWorkflowState(String sessionId) {
+        if (workflowService == null || sessionId == null || sessionId.isBlank()) {
+            return null;
+        }
+
+        List<String> workflowIds = workflowService.sessionWorkflowIds(sessionId);
+        for (int index = workflowIds.size() - 1; index >= 0; index--) {
+            String workflowId = workflowIds.get(index);
+            WorkflowMetadata workflow = workflowService.readWorkflow(workflowId);
+            if (workflow != null) {
+                Map<String, String> fields = workflowService.workflowFields(workflowId);
+                RecoverySource recoverySource = recoverySource(workflow, fields);
+                List<ChatSessionWorkflowStep> steps = workflowSteps(workflowId, recoverySource);
+                return new WorkflowState(workflow, fields, recoverySource.recoveredFromWorkflowId(), recoverySource.checkpointId(), steps);
+            }
+        }
+        return null;
+    }
+
+    private RecoverySource recoverySource(WorkflowMetadata workflow, Map<String, String> fields) {
+        String replayedFromWorkflowId = blankToNull(fields.get(WorkflowService.REPLAYED_FROM_WORKFLOW_ID));
+        String replayCheckpointId = blankToNull(fields.get(WorkflowService.REPLAY_CHECKPOINT_ID));
+        if (replayedFromWorkflowId != null && replayCheckpointId != null) {
+            return new RecoverySource(replayedFromWorkflowId, replayCheckpointId);
+        }
+        if (workflow.status() == WorkflowStatus.RECOVERING) {
+            String latestCheckpointId = latestCheckpointId(workflow.workflowId());
+            if (latestCheckpointId != null) {
+                return new RecoverySource(workflow.workflowId(), latestCheckpointId);
+            }
+        }
+        return new RecoverySource(replayedFromWorkflowId, replayCheckpointId);
+    }
+
+    private List<ChatSessionWorkflowStep> workflowSteps(String workflowId, RecoverySource recoverySource) {
+        if (workflowId.equals(recoverySource.recoveredFromWorkflowId()) && recoverySource.checkpointId() != null) {
+            return recoveredWorkflowSteps(workflowId, recoverySource.checkpointId());
+        }
+
+        List<ChatSessionWorkflowStep> steps = new ArrayList<>();
+        steps.addAll(recoveredWorkflowSteps(
+                recoverySource.recoveredFromWorkflowId(),
+                recoverySource.checkpointId()
+        ));
+        steps.addAll(workflowService.workflowEvents(workflowId, LIVE_WORKFLOW_EVENT_LIMIT).stream()
+                .map(event -> workflowStep(event, false))
+                .filter(step -> step != null)
+                .toList());
+        return List.copyOf(steps);
+    }
+
+    private List<ChatSessionWorkflowStep> recoveredWorkflowSteps(String workflowId, String checkpointId) {
+        if (workflowId == null || checkpointId == null) {
+            return List.of();
+        }
+
+        List<Map<String, String>> events = workflowService.workflowEvents(workflowId, LIVE_WORKFLOW_EVENT_LIMIT);
+        boolean hasCheckpointEvent = events.stream()
+                .anyMatch(event -> checkpointId.equals(value(event, "checkpointId")));
+        String checkpointedStepId = checkpointedStepId(checkpointId);
+        List<ChatSessionWorkflowStep> steps = new ArrayList<>();
+        boolean foundCheckpoint = false;
+        for (Map<String, String> event : events) {
+            ChatSessionWorkflowStep step = workflowStep(event, true);
+            if (step != null) {
+                steps.add(step);
+            }
+            if (checkpointId.equals(value(event, "checkpointId"))
+                    || (!hasCheckpointEvent && isCompletedStep(event, checkpointedStepId))) {
+                foundCheckpoint = true;
+                break;
+            }
+        }
+
+        return foundCheckpoint ? List.copyOf(steps) : List.of();
+    }
+
+    private String checkpointedStepId(String checkpointId) {
+        String value = blankToNull(checkpointId);
+        if (value == null) {
+            return "";
+        }
+        int lastSeparator = value.lastIndexOf(':');
+        if (lastSeparator < 0) {
+            return value;
+        }
+        int actorSeparator = value.lastIndexOf(':', lastSeparator - 1);
+        if (actorSeparator < 0) {
+            return value;
+        }
+        return value.substring(0, actorSeparator);
+    }
+
+    private boolean isCompletedStep(Map<String, String> event, String stepId) {
+        return stepId != null
+                && !stepId.isBlank()
+                && stepId.equals(value(event, "stepId"))
+                && "completed".equals(value(event, "status"));
+    }
+
+    private String latestCheckpointId(String workflowId) {
+        List<Map<String, String>> events = workflowService.workflowEvents(workflowId, LIVE_WORKFLOW_EVENT_LIMIT);
+        for (int index = events.size() - 1; index >= 0; index--) {
+            String checkpointId = blankToNull(events.get(index).get("checkpointId"));
+            if (checkpointId != null) {
+                return checkpointId;
+            }
+        }
+        return null;
+    }
+
+    private ChatSessionWorkflowStep workflowStep(Map<String, String> event, boolean recovered) {
+        if (event == null || event.isEmpty()) {
+            return null;
+        }
+
+        String stepId = value(event, "stepId");
+        if (stepId.isBlank()) {
+            return null;
+        }
+
+        String toolName = value(event, "toolName");
+        return new ChatSessionWorkflowStep(
+                stepId,
+                workflowStepLabel(stepId, toolName),
+                value(event, "kind"),
+                value(event, "status"),
+                longObject(value(event, "durationMs")),
+                value(event, "summary"),
+                value(event, "actorType"),
+                value(event, "actorName"),
+                recovered
+        );
+    }
+
+    private String workflowStepLabel(String stepId, String toolName) {
+        if (toolName != null && !toolName.isBlank()) {
+            return "Tool " + toolName;
+        }
+        if (stepId == null || stepId.isBlank()) {
+            return "Workflow step";
+        }
+        if (stepId.startsWith("checkpoint:")) {
+            return "Checkpoint";
+        }
+        return stepId.replace(':', ' ').replace('_', ' ').toLowerCase(Locale.ROOT);
+    }
+
+    private String workflowMode(Map<String, String> fields) {
+        String replayedFrom = blankToNull(fields.get(WorkflowService.REPLAYED_FROM_WORKFLOW_ID));
+        if (replayedFrom == null) {
+            return "chat";
+        }
+
+        String clientRequestId = blankToNull(fields.get("clientRequestId"));
+        return clientRequestId != null && clientRequestId.startsWith("recovery:") ? "recovery" : "replay";
+    }
+
+    private String value(Map<String, String> fields, String name) {
+        String value = fields.get(name);
+        return value == null ? "" : value;
+    }
+
+    private Long longObject(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return Math.max(0, Long.parseLong(value));
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
+    private String blankToNull(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value.trim();
+    }
+
+    private record WorkflowState(
+            WorkflowMetadata metadata,
+            Map<String, String> fields,
+            String recoveredFromWorkflowId,
+            String replayCheckpointId,
+            List<ChatSessionWorkflowStep> steps
+    ) {
+    }
+
+    private record RecoverySource(
+            String recoveredFromWorkflowId,
+            String checkpointId
+    ) {
     }
 
     private void addMetadataValues(LinkedHashSet<String> target, Object rawValue) {

@@ -259,6 +259,13 @@ public class WorkflowTimelineController {
         appendMetadataField(html, "Conversation", value(fields, "conversationId"));
         appendMetadataField(html, "Client request", value(fields, "clientRequestId"));
         appendMetadataField(html, "Previous workflow", value(fields, "previousWorkflowId"));
+        appendMetadataField(html, "Replayed from", value(fields, WorkflowService.REPLAYED_FROM_WORKFLOW_ID));
+        appendMetadataField(html, "Replay checkpoint", value(fields, WorkflowService.REPLAY_CHECKPOINT_ID));
+        appendMetadataField(html, "Recovered by", value(fields, WorkflowService.RECOVERED_BY_WORKFLOW_ID));
+        appendMetadataField(html, "Owner", value(fields, "ownerId"));
+        appendMetadataField(html, "Lease until", value(fields, "leaseUntil"));
+        appendMetadataField(html, "Lease version", value(fields, "leaseVersion"));
+        appendMetadataField(html, "Attempt", value(fields, "attempt"));
         appendMetadataField(html, "Created", createdAt);
         appendMetadataField(html, "Updated", updatedAt);
         appendMetadataField(html, "Finished", finishedAt);

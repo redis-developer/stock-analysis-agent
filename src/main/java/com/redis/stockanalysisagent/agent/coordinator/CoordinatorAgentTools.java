@@ -16,6 +16,7 @@ import com.redis.stockanalysisagent.agent.synthesis.SynthesisEvidence;
 import com.redis.stockanalysisagent.agent.synthesis.SynthesisResult;
 import com.redis.stockanalysisagent.agent.technicalanalysis.TechnicalAnalysisAgent;
 import com.redis.stockanalysisagent.agent.technicalanalysis.TechnicalAnalysisResult;
+import com.redis.stockanalysisagent.chat.ChatProgressMetadata;
 import com.redis.stockanalysisagent.chat.ChatProgressPublisher;
 import com.redis.stockanalysisagent.cache.ExternalDataAccess;
 import com.redis.stockanalysisagent.cache.ExternalDataCache;
@@ -32,6 +33,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 public class CoordinatorAgentTools {
@@ -70,6 +73,10 @@ public class CoordinatorAgentTools {
 
     public void startTrace() {
         activeTrace.set(new ExecutionTrace());
+    }
+
+    public void startTrace(String userMessage) {
+        activeTrace.set(ExecutionTrace.fromReplayMessage(userMessage));
     }
 
     public List<AgentExecution> drainExecutions() {
@@ -373,13 +380,20 @@ public class CoordinatorAgentTools {
     }
 
     private void agentRunning(AgentType agentType, String ticker, String summary) {
+        log.info(
+                "sub_agent_started agentType={} ticker={} actorName={}",
+                agentType,
+                ticker,
+                agentActorName(agentType)
+        );
         progressPublisher.running(
                 agentStepId(agentType, ticker),
                 agentProgressLabel(agentType, ticker),
                 ChatProgressPublisher.KIND_AGENT,
                 summary,
                 ChatProgressPublisher.ACTOR_TYPE_SUB_AGENT,
-                agentActorName(agentType)
+                agentActorName(agentType),
+                ChatProgressMetadata.input(agentInputPayload(agentType, ticker))
         );
     }
 
@@ -391,6 +405,15 @@ public class CoordinatorAgentTools {
             TokenUsageSummary tokenUsage,
             List<ExternalDataAccess> dataAccesses
     ) {
+        log.info(
+                "sub_agent_completed agentType={} ticker={} actorName={} durationMs={} tokenUsage={} dataAccesses={}",
+                agentType,
+                ticker,
+                agentActorName(agentType),
+                durationMs,
+                tokenUsage,
+                dataAccesses == null ? 0 : dataAccesses.size()
+        );
         progressPublisher.completed(
                 agentStepId(agentType, ticker),
                 agentProgressLabel(agentType, ticker),
@@ -400,11 +423,20 @@ public class CoordinatorAgentTools {
                 tokenUsage,
                 dataAccesses,
                 ChatProgressPublisher.ACTOR_TYPE_SUB_AGENT,
-                agentActorName(agentType)
+                agentActorName(agentType),
+                ChatProgressMetadata.payload(agentInputPayload(agentType, ticker), summary)
         );
     }
 
     private void agentFailed(AgentType agentType, String ticker, long durationMs, String summary) {
+        log.warn(
+                "sub_agent_failed agentType={} ticker={} actorName={} durationMs={} summary={}",
+                agentType,
+                ticker,
+                agentActorName(agentType),
+                durationMs,
+                summary
+        );
         progressPublisher.failed(
                 agentStepId(agentType, ticker),
                 agentProgressLabel(agentType, ticker),
@@ -412,12 +444,20 @@ public class CoordinatorAgentTools {
                 durationMs,
                 summary,
                 ChatProgressPublisher.ACTOR_TYPE_SUB_AGENT,
-                agentActorName(agentType)
+                agentActorName(agentType),
+                ChatProgressMetadata.input(agentInputPayload(agentType, ticker))
         );
     }
 
     private String agentActorName(AgentType agentType) {
         return agentType.name().toLowerCase(Locale.ROOT);
+    }
+
+    private String agentInputPayload(AgentType agentType, String ticker) {
+        return """
+                agent: %s
+                ticker: %s
+                """.formatted(agentType.name(), ticker == null ? "" : ticker);
     }
 
     private ExecutionTrace trace() {
@@ -495,9 +535,26 @@ public class CoordinatorAgentTools {
 
     private static final class ExecutionTrace {
 
+        private static final Pattern TICKER_JSON_PATTERN = Pattern.compile("\"ticker\"\\s*:\\s*\"([A-Za-z.\\-]+)\"");
+        private static final Pattern TICKER_ARGUMENT_PATTERN = Pattern.compile("(?i)\\bticker\\s*=\\s*([A-Za-z.\\-]+)");
+        private static final Pattern TICKER_LINE_PATTERN = Pattern.compile("(?im)^ticker\\s*:\\s*([A-Za-z.\\-]+)\\s*$");
+
         private final List<AgentExecution> executions = new ArrayList<>();
         private final Map<String, MarketSnapshot> marketData = new LinkedHashMap<>();
         private final Map<AgentType, Map<String, Object>> evidence = new LinkedHashMap<>();
+
+        private static ExecutionTrace fromReplayMessage(String userMessage) {
+            ExecutionTrace trace = new ExecutionTrace();
+            String recoveredEvidence = recoveredEvidenceBlock(userMessage);
+            if (recoveredEvidence.isBlank()) {
+                return trace;
+            }
+
+            for (String entry : recoveredEvidence.split("\\n\\s*\\n")) {
+                trace.storeRecoveredEvidence(entry);
+            }
+            return trace;
+        }
 
         private List<AgentExecution> executions() {
             return List.copyOf(executions);
@@ -549,6 +606,118 @@ public class CoordinatorAgentTools {
                 }
             }
             return filtered;
+        }
+
+        private void storeRecoveredEvidence(String entry) {
+            Map<String, String> fields = recoveredFields(entry);
+            AgentType agentType = recoveredAgentType(fields.get("label"), fields.get("Actor"), fields.get("Step"));
+            String ticker = recoveredTicker(fields.get("Step"), fields.get("Input"));
+            String output = fields.getOrDefault("Output", "");
+            if (agentType != null && !ticker.isBlank() && !output.isBlank()) {
+                storeEvidence(agentType, ticker, output);
+            }
+        }
+
+        private static String recoveredEvidenceBlock(String message) {
+            if (message == null || message.isBlank()) {
+                return "";
+            }
+
+            int start = message.indexOf("Recovered evidence:");
+            if (start < 0) {
+                return "";
+            }
+            start += "Recovered evidence:".length();
+
+            int end = message.indexOf("\nCheckpoint summary:", start);
+            return end < 0 ? message.substring(start).trim() : message.substring(start, end).trim();
+        }
+
+        private static Map<String, String> recoveredFields(String entry) {
+            Map<String, String> fields = new LinkedHashMap<>();
+            if (entry == null || entry.isBlank()) {
+                return fields;
+            }
+
+            String currentKey = "label";
+            StringBuilder currentValue = new StringBuilder();
+            for (String line : entry.split("\\R")) {
+                int separator = line.indexOf(": ");
+                if (separator > 0) {
+                    fields.put(currentKey, currentValue.toString().trim());
+                    currentKey = line.substring(0, separator);
+                    currentValue = new StringBuilder(line.substring(separator + 2));
+                } else {
+                    if (currentValue.length() > 0) {
+                        currentValue.append('\n');
+                    }
+                    currentValue.append(line);
+                }
+            }
+            fields.put(currentKey, currentValue.toString().trim());
+            return fields;
+        }
+
+        private static AgentType recoveredAgentType(String label, String actor, String step) {
+            String text = "%s %s %s".formatted(
+                    label == null ? "" : label,
+                    actor == null ? "" : actor,
+                    step == null ? "" : step
+            ).toLowerCase(Locale.ROOT);
+
+            if (text.contains("technical_analysis") || text.contains("technicalanalysis")) {
+                return AgentType.TECHNICAL_ANALYSIS;
+            }
+            if (text.contains("fundamentals")) {
+                return AgentType.FUNDAMENTALS;
+            }
+            if (text.contains("market_data") || text.contains("marketdata")) {
+                return AgentType.MARKET_DATA;
+            }
+            if (text.contains("news")) {
+                return AgentType.NEWS;
+            }
+            return null;
+        }
+
+        private static String recoveredTicker(String step, String input) {
+            String ticker = tickerFromStep(step);
+            if (!ticker.isBlank()) {
+                return ticker;
+            }
+
+            ticker = tickerFromPattern(TICKER_LINE_PATTERN, input);
+            if (!ticker.isBlank()) {
+                return ticker;
+            }
+
+            ticker = tickerFromPattern(TICKER_ARGUMENT_PATTERN, input);
+            if (!ticker.isBlank()) {
+                return ticker;
+            }
+
+            return tickerFromPattern(TICKER_JSON_PATTERN, input);
+        }
+
+        private static String tickerFromStep(String step) {
+            if (step == null || step.isBlank()) {
+                return "";
+            }
+
+            String[] parts = step.split(":");
+            if (parts.length == 2 && !parts[1].isBlank()) {
+                return parts[1].trim().toUpperCase(Locale.ROOT);
+            }
+            return "";
+        }
+
+        private static String tickerFromPattern(Pattern pattern, String input) {
+            if (input == null || input.isBlank()) {
+                return "";
+            }
+
+            Matcher matcher = pattern.matcher(input);
+            return matcher.find() ? matcher.group(1).trim().toUpperCase(Locale.ROOT) : "";
         }
     }
 }

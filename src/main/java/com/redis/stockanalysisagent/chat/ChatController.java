@@ -7,6 +7,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
 import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
@@ -28,6 +30,7 @@ import java.io.UncheckedIOException;
 @RequestMapping("/api/chat")
 public class ChatController {
 
+    private static final Logger log = LoggerFactory.getLogger(ChatController.class);
     private static final ObjectMapper OBJECT_MAPPER = JsonMapper.builder().build();
 
     private final ChatService chatService;
@@ -89,7 +92,20 @@ public class ChatController {
                 );
                 writeJsonLine(outputStream, httpResponse, ChatProgressEvent.finalResponse(response));
             } catch (UncheckedIOException ignored) {
+                log.info(
+                        "chat_stream_disconnected userId={} sessionId={} clientRequestId={}",
+                        prepared.userId(),
+                        prepared.sessionId(),
+                        prepared.clientRequestId()
+                );
             } catch (RuntimeException ex) {
+                log.warn(
+                        "chat_stream_failed userId={} sessionId={} clientRequestId={} error={}",
+                        prepared.userId(),
+                        prepared.sessionId(),
+                        prepared.clientRequestId(),
+                        ex.getClass().getSimpleName()
+                );
                 writeJsonLine(outputStream, httpResponse, ChatProgressEvent.error(errorMessage(ex)));
             }
         };
@@ -147,6 +163,12 @@ public class ChatController {
 
     private ChatResponse executeChat(PreparedChatRequest prepared) {
         long startedAt = System.nanoTime();
+        log.info(
+                "chat_request_start userId={} sessionId={} clientRequestId={}",
+                prepared.userId(),
+                prepared.sessionId(),
+                prepared.clientRequestId()
+        );
         ChatService.ChatTurn turn = chatService.chat(
                 prepared.userId(),
                 prepared.sessionId(),
@@ -158,6 +180,15 @@ public class ChatController {
         );
         long responseTimeMs = (System.nanoTime() - startedAt) / 1_000_000;
         sessionAccess.cacheChatSession(prepared.session(), prepared.sessionId());
+        log.info(
+                "chat_request_complete userId={} sessionId={} conversationId={} workflowId={} workflowStatus={} durationMs={}",
+                prepared.userId(),
+                prepared.sessionId(),
+                turn.conversationId(),
+                turn.workflowId(),
+                turn.workflowStatus(),
+                responseTimeMs
+        );
 
         return new ChatResponse(
                 prepared.userId(),

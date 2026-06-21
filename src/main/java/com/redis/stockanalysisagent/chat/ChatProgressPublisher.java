@@ -2,6 +2,7 @@ package com.redis.stockanalysisagent.chat;
 
 import com.redis.stockanalysisagent.agent.TokenUsageSummary;
 import com.redis.stockanalysisagent.cache.ExternalDataAccess;
+import com.redis.stockanalysisagent.session.dto.ChatSessionMetadata;
 import com.redis.stockanalysisagent.workflow.WorkflowContextHolder;
 import com.redis.stockanalysisagent.workflow.WorkflowEventService;
 import org.slf4j.Logger;
@@ -113,6 +114,20 @@ public class ChatProgressPublisher {
             String actorType,
             String actorName
     ) {
+        completed(id, label, kind, durationMs, summary, tokenUsage, actorType, actorName, ChatProgressMetadata.empty());
+    }
+
+    public void completed(
+            String id,
+            String label,
+            String kind,
+            long durationMs,
+            String summary,
+            TokenUsageSummary tokenUsage,
+            String actorType,
+            String actorName,
+            ChatProgressMetadata metadata
+    ) {
         emit(step(
                 id,
                 label,
@@ -124,7 +139,7 @@ public class ChatProgressPublisher {
                 List.of(),
                 actorType,
                 actorName,
-                ChatProgressMetadata.empty()
+                metadata
         ));
     }
 
@@ -149,6 +164,20 @@ public class ChatProgressPublisher {
             String actorType,
             String actorName
     ) {
+        completed(id, label, kind, durationMs, summary, dataAccesses, actorType, actorName, ChatProgressMetadata.empty());
+    }
+
+    public void completed(
+            String id,
+            String label,
+            String kind,
+            long durationMs,
+            String summary,
+            List<ExternalDataAccess> dataAccesses,
+            String actorType,
+            String actorName,
+            ChatProgressMetadata metadata
+    ) {
         emit(step(
                 id,
                 label,
@@ -160,7 +189,7 @@ public class ChatProgressPublisher {
                 dataAccesses,
                 actorType,
                 actorName,
-                ChatProgressMetadata.empty()
+                metadata
         ));
     }
 
@@ -197,6 +226,21 @@ public class ChatProgressPublisher {
             String actorType,
             String actorName
     ) {
+        completed(id, label, kind, durationMs, summary, tokenUsage, dataAccesses, actorType, actorName, ChatProgressMetadata.empty());
+    }
+
+    public void completed(
+            String id,
+            String label,
+            String kind,
+            long durationMs,
+            String summary,
+            TokenUsageSummary tokenUsage,
+            List<ExternalDataAccess> dataAccesses,
+            String actorType,
+            String actorName,
+            ChatProgressMetadata metadata
+    ) {
         emit(step(
                 id,
                 label,
@@ -208,7 +252,7 @@ public class ChatProgressPublisher {
                 dataAccesses,
                 actorType,
                 actorName,
-                ChatProgressMetadata.empty()
+                metadata
         ));
     }
 
@@ -239,6 +283,13 @@ public class ChatProgressPublisher {
             ChatProgressMetadata metadata
     ) {
         emit(step(id, label, kind, STATUS_FAILED, durationMs, summary, null, List.of(), actorType, actorName, metadata));
+    }
+
+    public void workflow(ChatSessionMetadata metadata) {
+        EventSink sink = activeSink.get();
+        if (sink != null) {
+            sink.accept(ChatProgressEvent.workflow(metadata));
+        }
     }
 
     private ChatProgressStep step(

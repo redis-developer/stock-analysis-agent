@@ -42,6 +42,12 @@ spring:
         transcription: none
         
 stock-analysis:
+  workflow:
+    lease: ${STOCK_ANALYSIS_WORKFLOW_LEASE:15s}
+    lease-renewal-interval: ${STOCK_ANALYSIS_WORKFLOW_LEASE_RENEWAL_INTERVAL:5s}
+    recovery:
+      scan-delay-ms: ${STOCK_ANALYSIS_WORKFLOW_RECOVERY_SCAN_DELAY_MS:5000}
+      initial-delay-ms: ${STOCK_ANALYSIS_WORKFLOW_RECOVERY_INITIAL_DELAY_MS:5000}
   market-data:
     provider: twelve-data
     twelve-data:

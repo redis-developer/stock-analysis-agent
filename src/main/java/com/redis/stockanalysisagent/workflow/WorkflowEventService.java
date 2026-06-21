@@ -2,6 +2,8 @@ package com.redis.stockanalysisagent.workflow;
 
 import com.redis.stockanalysisagent.chat.ChatProgressStep;
 import com.redis.stockanalysisagent.chat.ChatProgressMetadata;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessException;
 import org.springframework.data.redis.core.RedisOperations;
@@ -16,6 +18,8 @@ import java.util.Map;
 
 @Service
 public class WorkflowEventService {
+
+    private static final Logger log = LoggerFactory.getLogger(WorkflowEventService.class);
 
     static final String EVENTS_SUFFIX = ":events";
     static final String CHECKPOINTS_SUFFIX = ":checkpoints";
@@ -66,6 +70,26 @@ public class WorkflowEventService {
                 return null;
             }
         });
+        log.info(
+                "workflow_event_appended workflowId={} stepId={} status={} kind={} actorType={} actorName={} checkpoint={}",
+                workflowId,
+                step.id(),
+                step.status(),
+                step.kind(),
+                step.actorType(),
+                step.actorName(),
+                checkpoint != null
+        );
+        if (checkpoint != null) {
+            log.info(
+                    "workflow_checkpoint_created workflowId={} checkpointId={} stepId={} actorType={} actorName={}",
+                    workflowId,
+                    checkpoint.getOrDefault("checkpointId", ""),
+                    checkpoint.getOrDefault("stepId", ""),
+                    checkpoint.getOrDefault("actorType", ""),
+                    checkpoint.getOrDefault("actorName", "")
+            );
+        }
     }
 
     private Map<String, String> fields(String workflowId, ChatProgressStep step, Instant timestamp) {
