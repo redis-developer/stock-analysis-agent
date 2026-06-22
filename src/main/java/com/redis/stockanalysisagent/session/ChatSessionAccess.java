@@ -1,6 +1,7 @@
 package com.redis.stockanalysisagent.session;
 
 import jakarta.servlet.http.HttpSession;
+import com.redis.stockanalysisagent.workflow.WorkflowApprovalService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
@@ -20,6 +21,7 @@ public final class ChatSessionAccess {
     private static final String API_CACHING_ENABLED_SESSION_ATTRIBUTE = "stockAnalysisApiCachingEnabled";
     private static final String SEMANTIC_CACHING_ENABLED_SESSION_ATTRIBUTE = "stockAnalysisSemanticCachingEnabled";
     private static final String RATE_LIMITING_ENABLED_SESSION_ATTRIBUTE = "stockAnalysisRateLimitingEnabled";
+    private static final String APPROVAL_REQUIRED_TOOLS_SESSION_ATTRIBUTE = "stockAnalysisApprovalRequiredTools";
     private static final String CHAT_SESSIONS_SESSION_ATTRIBUTE = "stockAnalysisChatSessions";
     private static final int MAX_RETRIEVED_MEMORIES_LIMIT = 20;
 
@@ -59,6 +61,14 @@ public final class ChatSessionAccess {
         return sessionRateLimitingEnabled(session);
     }
 
+    public boolean activeRequireApprovalEnabled(HttpSession session) {
+        return !activeApprovalRequiredTools(session).isEmpty();
+    }
+
+    public List<String> activeApprovalRequiredTools(HttpSession session) {
+        return sessionApprovalRequiredTools(session);
+    }
+
     public int sessionRetrievedMemoriesLimit(HttpSession session) {
         if (session == null) {
             return DEFAULT_RETRIEVED_MEMORIES_LIMIT;
@@ -84,6 +94,21 @@ public final class ChatSessionAccess {
         return sessionBoolean(session, RATE_LIMITING_ENABLED_SESSION_ATTRIBUTE);
     }
 
+    public boolean sessionRequireApprovalEnabled(HttpSession session) {
+        return !sessionApprovalRequiredTools(session).isEmpty();
+    }
+
+    public List<String> sessionApprovalRequiredTools(HttpSession session) {
+        if (session == null) {
+            return List.of();
+        }
+        Object value = session.getAttribute(APPROVAL_REQUIRED_TOOLS_SESSION_ATTRIBUTE);
+        if (!(value instanceof Iterable<?> tools)) {
+            return List.of();
+        }
+        return normalizeApprovalRequiredTools(tools);
+    }
+
     public int normalizeRetrievedMemoriesLimit(Integer value) {
         if (value == null) {
             return DEFAULT_RETRIEVED_MEMORIES_LIMIT;
@@ -98,6 +123,33 @@ public final class ChatSessionAccess {
 
     public boolean normalizeRateLimitingEnabled(Boolean value) {
         return value == null || value;
+    }
+
+    public boolean normalizeRequireApprovalEnabled(Boolean value) {
+        return Boolean.TRUE.equals(value);
+    }
+
+    public List<String> normalizeApprovalRequiredTools(Iterable<?> toolNames) {
+        if (toolNames == null) {
+            return List.of();
+        }
+        List<String> values = new ArrayList<>();
+        for (Object toolName : toolNames) {
+            if (toolName instanceof String value) {
+                values.add(value);
+            }
+        }
+        return WorkflowApprovalService.normalizeToolNames(values);
+    }
+
+    public List<String> normalizeApprovalRequiredTools(Boolean requireApprovalEnabled, Iterable<?> toolNames) {
+        List<String> normalizedTools = normalizeApprovalRequiredTools(toolNames);
+        if (!normalizedTools.isEmpty() || requireApprovalEnabled == null) {
+            return normalizedTools;
+        }
+        return normalizeRequireApprovalEnabled(requireApprovalEnabled)
+                ? WorkflowApprovalService.approvableTools()
+                : List.of();
     }
 
     public void storeUserId(HttpSession session, String userId) {
@@ -118,6 +170,20 @@ public final class ChatSessionAccess {
 
     public void storeRateLimitingEnabled(HttpSession session, boolean rateLimitingEnabled) {
         session.setAttribute(RATE_LIMITING_ENABLED_SESSION_ATTRIBUTE, rateLimitingEnabled);
+    }
+
+    public void storeRequireApprovalEnabled(HttpSession session, boolean requireApprovalEnabled) {
+        storeApprovalRequiredTools(
+                session,
+                requireApprovalEnabled ? WorkflowApprovalService.approvableTools() : List.of()
+        );
+    }
+
+    public void storeApprovalRequiredTools(HttpSession session, Iterable<String> toolNames) {
+        session.setAttribute(
+                APPROVAL_REQUIRED_TOOLS_SESSION_ATTRIBUTE,
+                new ArrayList<>(WorkflowApprovalService.normalizeToolNames(toolNames))
+        );
     }
 
     public void clearCachedChatSessions(HttpSession session) {

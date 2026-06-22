@@ -69,7 +69,8 @@ class WorkflowRecoveryServiceTests {
                 List.of(),
                 List.of(),
                 "replay-workflow",
-                WorkflowStatus.COMPLETED
+                WorkflowStatus.COMPLETED,
+                null
         ));
 
         recoveryService.recoverExpiredWorkflows();

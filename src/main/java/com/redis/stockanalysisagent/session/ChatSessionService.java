@@ -13,6 +13,8 @@ import com.redis.stockanalysisagent.session.dto.ChatSessionWorkflowStep;
 import com.redis.stockanalysisagent.workflow.WorkflowMetadata;
 import com.redis.stockanalysisagent.workflow.WorkflowService;
 import com.redis.stockanalysisagent.workflow.WorkflowStatus;
+import com.redis.stockanalysisagent.workflow.ToolApproval;
+import com.redis.stockanalysisagent.workflow.WorkflowApprovalService;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,6 +29,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.time.Instant;
 
 @Service
 public class ChatSessionService {
@@ -38,12 +41,19 @@ public class ChatSessionService {
     private final AmsChatMemoryRepository memoryRepository;
     private final WorkflowService workflowService;
     private final ChatSessionIndexService sessionIndexService;
+    private final WorkflowApprovalService approvalService;
 
     public ChatSessionService(
             ChatMemory chatMemory,
             AmsChatMemoryRepository memoryRepository
     ) {
-        this(chatMemory, memoryRepository, (WorkflowService) null, null);
+        this(
+                chatMemory,
+                memoryRepository,
+                (WorkflowService) null,
+                (ChatSessionIndexService) null,
+                (WorkflowApprovalService) null
+        );
     }
 
     @Autowired
@@ -51,9 +61,16 @@ public class ChatSessionService {
             ChatMemory chatMemory,
             AmsChatMemoryRepository memoryRepository,
             ObjectProvider<WorkflowService> workflowService,
-            ObjectProvider<ChatSessionIndexService> sessionIndexService
+            ObjectProvider<ChatSessionIndexService> sessionIndexService,
+            ObjectProvider<WorkflowApprovalService> approvalService
     ) {
-        this(chatMemory, memoryRepository, workflowService.getIfAvailable(), sessionIndexService.getIfAvailable());
+        this(
+                chatMemory,
+                memoryRepository,
+                workflowService.getIfAvailable(),
+                sessionIndexService.getIfAvailable(),
+                approvalService.getIfAvailable()
+        );
     }
 
     ChatSessionService(
@@ -61,7 +78,7 @@ public class ChatSessionService {
             AmsChatMemoryRepository memoryRepository,
             WorkflowService workflowService
     ) {
-        this(chatMemory, memoryRepository, workflowService, null);
+        this(chatMemory, memoryRepository, workflowService, null, null);
     }
 
     ChatSessionService(
@@ -70,10 +87,21 @@ public class ChatSessionService {
             WorkflowService workflowService,
             ChatSessionIndexService sessionIndexService
     ) {
+        this(chatMemory, memoryRepository, workflowService, sessionIndexService, null);
+    }
+
+    ChatSessionService(
+            ChatMemory chatMemory,
+            AmsChatMemoryRepository memoryRepository,
+            WorkflowService workflowService,
+            ChatSessionIndexService sessionIndexService,
+            WorkflowApprovalService approvalService
+    ) {
         this.chatMemory = chatMemory;
         this.memoryRepository = memoryRepository;
         this.workflowService = workflowService;
         this.sessionIndexService = sessionIndexService;
+        this.approvalService = approvalService;
     }
 
     public void clearSession(String userId, String sessionId) {
@@ -196,7 +224,8 @@ public class ChatSessionService {
                         executionSteps(message.metadata()),
                         stringList(message.metadata(), "retrievedMemories"),
                         booleanFlag(message.metadata(), "fromSemanticCache"),
-                        booleanFlag(message.metadata(), "fromSemanticGuardrail")
+                        booleanFlag(message.metadata(), "fromSemanticGuardrail"),
+                        pendingApproval(message.metadata())
                 )
                 : null;
     }
@@ -572,6 +601,44 @@ public class ChatSessionService {
                 .toList();
     }
 
+    private ToolApproval pendingApproval(Map<String, Object> metadata) {
+        Object value = metadata == null ? null : metadata.get("pendingApproval");
+        if (!(value instanceof Map<?, ?> raw)) {
+            return null;
+        }
+        ToolApproval storedApproval = new ToolApproval(
+                text(raw.get("approvalId")),
+                text(raw.get("workflowId")),
+                text(raw.get("activeWorkflowId")),
+                text(raw.get("userId")),
+                text(raw.get("sessionId")),
+                text(raw.get("conversationId")),
+                text(raw.get("toolName")),
+                text(raw.get("agentType")),
+                text(raw.get("ticker")),
+                text(raw.get("question")),
+                text(raw.get("arguments")),
+                text(raw.get("status")),
+                instant(raw.get("createdAt")),
+                instant(raw.get("updatedAt")),
+                instant(raw.get("decidedAt")),
+                text(raw.get("resumedWorkflowId"))
+        );
+        return currentPendingApproval(storedApproval);
+    }
+
+    private ToolApproval currentPendingApproval(ToolApproval storedApproval) {
+        if (storedApproval == null || !storedApproval.pending()) {
+            return null;
+        }
+        if (approvalService == null) {
+            return storedApproval;
+        }
+        return approvalService.readApproval(storedApproval.approvalId())
+                .filter(ToolApproval::pending)
+                .orElse(null);
+    }
+
     private ExternalDataAccess dataAccess(Object value) {
         if (!(value instanceof Map<?, ?> raw)) {
             return null;
@@ -587,6 +654,11 @@ public class ChatSessionService {
 
     private String text(Object value) {
         return value == null ? null : value.toString();
+    }
+
+    private Instant instant(Object value) {
+        String text = text(value);
+        return text == null || text.isBlank() ? null : Instant.parse(text);
     }
 
     private long longValue(Object value) {

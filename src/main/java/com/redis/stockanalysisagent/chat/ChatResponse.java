@@ -2,6 +2,7 @@ package com.redis.stockanalysisagent.chat;
 
 import com.redis.stockanalysisagent.agent.TokenUsageSummary;
 import com.redis.stockanalysisagent.cache.ExternalApiUsageSnapshot;
+import com.redis.stockanalysisagent.workflow.ToolApproval;
 import com.redis.stockanalysisagent.workflow.WorkflowStatus;
 
 import java.util.List;
@@ -20,16 +21,20 @@ public record ChatResponse(
         boolean apiCachingEnabled,
         boolean semanticCachingEnabled,
         boolean rateLimitingEnabled,
+        boolean requireApprovalEnabled,
+        List<String> approvalRequiredTools,
         ExternalApiUsageSnapshot providerUsage,
         long responseTimeMs,
         List<String> tickers,
         List<String> triggeredAgents,
         String workflowId,
-        WorkflowStatus workflowStatus
+        WorkflowStatus workflowStatus,
+        ToolApproval pendingApproval
 ) {
     public ChatResponse {
         retrievedMemories = retrievedMemories == null ? List.of() : List.copyOf(retrievedMemories);
         executionSteps = executionSteps == null ? List.of() : List.copyOf(executionSteps);
+        approvalRequiredTools = approvalRequiredTools == null ? List.of() : List.copyOf(approvalRequiredTools);
         tickers = tickers == null ? List.of() : List.copyOf(tickers);
         triggeredAgents = triggeredAgents == null ? List.of() : List.copyOf(triggeredAgents);
     }

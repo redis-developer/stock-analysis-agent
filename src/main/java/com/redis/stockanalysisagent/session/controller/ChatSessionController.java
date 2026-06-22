@@ -122,6 +122,10 @@ public class ChatSessionController {
                 session,
                 sessionAccess.normalizeRateLimitingEnabled(request.rateLimitingEnabled())
         );
+        sessionAccess.storeApprovalRequiredTools(
+                session,
+                sessionAccess.normalizeApprovalRequiredTools(request.requireApprovalEnabled(), request.approvalRequiredTools())
+        );
         sessionAccess.clearCachedChatSessions(session);
         log.info("chat_login userId={} httpSessionId={}", userId, session.getId());
         return ResponseEntity.ok(contextResponse(session));
@@ -149,6 +153,10 @@ public class ChatSessionController {
         sessionAccess.storeRateLimitingEnabled(
                 session,
                 sessionAccess.normalizeRateLimitingEnabled(request.rateLimitingEnabled())
+        );
+        sessionAccess.storeApprovalRequiredTools(
+                session,
+                sessionAccess.normalizeApprovalRequiredTools(request.requireApprovalEnabled(), request.approvalRequiredTools())
         );
         return ResponseEntity.ok(contextResponse(session));
     }
@@ -239,6 +247,8 @@ public class ChatSessionController {
                 sessionAccess.sessionApiCachingEnabled(session),
                 sessionAccess.sessionSemanticCachingEnabled(session),
                 sessionAccess.sessionRateLimitingEnabled(session),
+                sessionAccess.sessionRequireApprovalEnabled(session),
+                sessionAccess.sessionApprovalRequiredTools(session),
                 rateLimitStatus.limit(),
                 rateLimitStatus.remainingTokens(),
                 providerUsageSnapshot(),

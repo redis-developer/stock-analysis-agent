@@ -36,7 +36,7 @@ class ChatCacheControllerTests {
     @Test
     void cacheEndpointReturnsInspectionForLoggedInUser() {
         MockHttpServletRequest request = new MockHttpServletRequest();
-        sessionController.login(new LoginRequest("alice", 7, null, null, null), request);
+        sessionController.login(new LoginRequest("alice", 7, null, null, null, null, null), request);
         CacheInspectionService.CacheContents contents = new CacheInspectionService.CacheContents(List.of(
                 new CacheInspectionService.CacheGroup("market-data-quotes", 1, false, List.of(
                         new CacheInspectionService.CacheEntry("AAPL", 30L, "MarketSnapshot", 2, false, "{}")
@@ -75,7 +75,7 @@ class ChatCacheControllerTests {
     @Test
     void deleteCacheEntryUsesCacheNameAndKey() {
         MockHttpServletRequest request = new MockHttpServletRequest();
-        sessionController.login(new LoginRequest("alice", 7, null, null, null), request);
+        sessionController.login(new LoginRequest("alice", 7, null, null, null, null, null), request);
         when(cacheInspectionService.deleteEntry("market-data-quotes", "AAPL")).thenReturn(true);
 
         controller.deleteCacheEntry("market-data-quotes", "AAPL", request);
@@ -86,7 +86,7 @@ class ChatCacheControllerTests {
     @Test
     void deleteCacheEntryReturnsNotFoundWhenEntryDoesNotExist() {
         MockHttpServletRequest request = new MockHttpServletRequest();
-        sessionController.login(new LoginRequest("alice", 7, null, null, null), request);
+        sessionController.login(new LoginRequest("alice", 7, null, null, null, null, null), request);
         when(cacheInspectionService.deleteEntry("market-data-quotes", "AAPL")).thenReturn(false);
 
         assertThatThrownBy(() -> controller.deleteCacheEntry("market-data-quotes", "AAPL", request))

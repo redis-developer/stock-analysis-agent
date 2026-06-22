@@ -25,6 +25,7 @@ import tools.jackson.databind.json.JsonMapper;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.UncheckedIOException;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/chat")
@@ -141,11 +142,15 @@ public class ChatController {
         boolean rateLimitingEnabled = request.rateLimitingEnabled() != null
                 ? sessionAccess.normalizeRateLimitingEnabled(request.rateLimitingEnabled())
                 : sessionAccess.activeRateLimitingEnabled(session);
+        List<String> approvalRequiredTools = request.approvalRequiredTools() != null || request.requireApprovalEnabled() != null
+                ? sessionAccess.normalizeApprovalRequiredTools(request.requireApprovalEnabled(), request.approvalRequiredTools())
+                : sessionAccess.activeApprovalRequiredTools(session);
         if (sessionAccess.sessionManagementEnabled() && session != null) {
             sessionAccess.storeRetrievedMemoriesLimit(session, retrievedMemoriesLimit);
             sessionAccess.storeApiCachingEnabled(session, apiCachingEnabled);
             sessionAccess.storeSemanticCachingEnabled(session, semanticCachingEnabled);
             sessionAccess.storeRateLimitingEnabled(session, rateLimitingEnabled);
+            sessionAccess.storeApprovalRequiredTools(session, approvalRequiredTools);
         }
 
         return new PreparedChatRequest(
@@ -157,7 +162,8 @@ public class ChatController {
                 retrievedMemoriesLimit,
                 apiCachingEnabled,
                 semanticCachingEnabled,
-                rateLimitingEnabled
+                rateLimitingEnabled,
+                approvalRequiredTools
         );
     }
 
@@ -176,7 +182,8 @@ public class ChatController {
                 prepared.clientRequestId(),
                 prepared.retrievedMemoriesLimit(),
                 prepared.apiCachingEnabled(),
-                prepared.semanticCachingEnabled()
+                prepared.semanticCachingEnabled(),
+                prepared.approvalRequiredTools()
         );
         long responseTimeMs = (System.nanoTime() - startedAt) / 1_000_000;
         log.info(
@@ -203,12 +210,15 @@ public class ChatController {
                 prepared.apiCachingEnabled(),
                 prepared.semanticCachingEnabled(),
                 prepared.rateLimitingEnabled(),
+                !prepared.approvalRequiredTools().isEmpty(),
+                prepared.approvalRequiredTools(),
                 providerUsageSnapshot(),
                 responseTimeMs,
                 turn.tickers(),
                 turn.triggeredAgents(),
                 turn.workflowId(),
-                turn.workflowStatus()
+                turn.workflowStatus(),
+                turn.pendingApproval()
         );
     }
 
@@ -249,7 +259,11 @@ public class ChatController {
             int retrievedMemoriesLimit,
             boolean apiCachingEnabled,
             boolean semanticCachingEnabled,
-            boolean rateLimitingEnabled
+            boolean rateLimitingEnabled,
+            List<String> approvalRequiredTools
     ) {
+        public PreparedChatRequest {
+            approvalRequiredTools = approvalRequiredTools == null ? List.of() : List.copyOf(approvalRequiredTools);
+        }
     }
 }

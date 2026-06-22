@@ -21,8 +21,11 @@ import com.redis.stockanalysisagent.chat.ChatProgressPublisher;
 import com.redis.stockanalysisagent.cache.ExternalDataAccess;
 import com.redis.stockanalysisagent.cache.ExternalDataCache;
 import com.redis.stockanalysisagent.stock.MarketSnapshot;
+import com.redis.stockanalysisagent.workflow.ToolApproval;
+import com.redis.stockanalysisagent.workflow.WorkflowApprovalService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Service;
@@ -49,6 +52,7 @@ public class CoordinatorAgentTools {
     private final SynthesisAgent synthesisAgent;
     private final ExternalDataCache externalDataCache;
     private final ChatProgressPublisher progressPublisher;
+    private final WorkflowApprovalService approvalService;
     private final ThreadLocal<ExecutionTrace> activeTrace = new ThreadLocal<>();
 
     public CoordinatorAgentTools(
@@ -61,6 +65,31 @@ public class CoordinatorAgentTools {
             ExternalDataCache externalDataCache,
             ChatProgressPublisher progressPublisher
     ) {
+        this(
+                marketDataAgent,
+                fundamentalsAgent,
+                newsAgent,
+                technicalAnalysisAgent,
+                backtestAgent,
+                synthesisAgent,
+                externalDataCache,
+                progressPublisher,
+                null
+        );
+    }
+
+    @Autowired
+    public CoordinatorAgentTools(
+            MarketDataAgent marketDataAgent,
+            FundamentalsAgent fundamentalsAgent,
+            NewsAgent newsAgent,
+            TechnicalAnalysisAgent technicalAnalysisAgent,
+            BacktestAgent backtestAgent,
+            SynthesisAgent synthesisAgent,
+            ExternalDataCache externalDataCache,
+            ChatProgressPublisher progressPublisher,
+            WorkflowApprovalService approvalService
+    ) {
         this.marketDataAgent = marketDataAgent;
         this.fundamentalsAgent = fundamentalsAgent;
         this.newsAgent = newsAgent;
@@ -69,6 +98,7 @@ public class CoordinatorAgentTools {
         this.synthesisAgent = synthesisAgent;
         this.externalDataCache = externalDataCache;
         this.progressPublisher = progressPublisher;
+        this.approvalService = approvalService;
     }
 
     public void startTrace() {
@@ -97,6 +127,10 @@ public class CoordinatorAgentTools {
             String question
     ) {
         String normalizedTicker = normalizeTicker(ticker);
+        ToolApproval approval = requireApproval("runMarketDataAgent", AgentType.MARKET_DATA, normalizedTicker, question);
+        if (approval != null && approval.rejected()) {
+            return approvalRejectedResult(approval);
+        }
         externalDataCache.clearRecordedAccesses();
         long startedAt = System.nanoTime();
         agentRunning(AgentType.MARKET_DATA, normalizedTicker, "Triggering the market data agent.");
@@ -137,6 +171,10 @@ public class CoordinatorAgentTools {
             String question
     ) {
         String normalizedTicker = normalizeTicker(ticker);
+        ToolApproval approval = requireApproval("runFundamentalsAgent", AgentType.FUNDAMENTALS, normalizedTicker, question);
+        if (approval != null && approval.rejected()) {
+            return approvalRejectedResult(approval);
+        }
         externalDataCache.clearRecordedAccesses();
         long startedAt = System.nanoTime();
         agentRunning(AgentType.FUNDAMENTALS, normalizedTicker, "Triggering the fundamentals agent.");
@@ -180,6 +218,10 @@ public class CoordinatorAgentTools {
             String question
     ) {
         String normalizedTicker = normalizeTicker(ticker);
+        ToolApproval approval = requireApproval("runNewsAgent", AgentType.NEWS, normalizedTicker, question);
+        if (approval != null && approval.rejected()) {
+            return approvalRejectedResult(approval);
+        }
         externalDataCache.clearRecordedAccesses();
         long startedAt = System.nanoTime();
         agentRunning(AgentType.NEWS, normalizedTicker, "Triggering the news agent.");
@@ -219,6 +261,10 @@ public class CoordinatorAgentTools {
             String question
     ) {
         String normalizedTicker = normalizeTicker(ticker);
+        ToolApproval approval = requireApproval("runTechnicalAnalysisAgent", AgentType.TECHNICAL_ANALYSIS, normalizedTicker, question);
+        if (approval != null && approval.rejected()) {
+            return approvalRejectedResult(approval);
+        }
         externalDataCache.clearRecordedAccesses();
         long startedAt = System.nanoTime();
         agentRunning(AgentType.TECHNICAL_ANALYSIS, normalizedTicker, "Triggering the technical analysis agent.");
@@ -258,6 +304,10 @@ public class CoordinatorAgentTools {
             String question
     ) {
         String normalizedTicker = normalizeTicker(ticker);
+        ToolApproval approval = requireApproval("runBacktestAgent", AgentType.BACKTEST, normalizedTicker, question);
+        if (approval != null && approval.rejected()) {
+            return approvalRejectedResult(approval);
+        }
         externalDataCache.clearRecordedAccesses();
         long startedAt = System.nanoTime();
         agentRunning(AgentType.BACKTEST, normalizedTicker, "Triggering the backtest agent.");
@@ -356,6 +406,22 @@ public class CoordinatorAgentTools {
                 accesses
         ));
         agentFailed(agentType, ticker, elapsedDurationMs(startedAt), message);
+        return AgentToolResult.error(message);
+    }
+
+    private ToolApproval requireApproval(String toolName, AgentType agentType, String ticker, String question) {
+        return approvalService == null ? null : approvalService.requireApproval(toolName, agentType, ticker, question);
+    }
+
+    private AgentToolResult approvalRejectedResult(ToolApproval approval) {
+        String message = "Human rejected tool " + approval.toolName() + " for " + approval.ticker() + ".";
+        log.info(
+                "tool_call_rejected_by_human approvalId={} workflowId={} toolName={} ticker={}",
+                approval.approvalId(),
+                approval.workflowId(),
+                approval.toolName(),
+                approval.ticker()
+        );
         return AgentToolResult.error(message);
     }
 

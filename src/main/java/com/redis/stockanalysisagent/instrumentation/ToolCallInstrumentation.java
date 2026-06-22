@@ -2,6 +2,7 @@ package com.redis.stockanalysisagent.instrumentation;
 
 import com.redis.stockanalysisagent.chat.ChatProgressMetadata;
 import com.redis.stockanalysisagent.chat.ChatProgressPublisher;
+import com.redis.stockanalysisagent.workflow.ApprovalRequiredException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ToolContext;
@@ -135,6 +136,29 @@ public class ToolCallInstrumentation {
                 return result;
             } catch (RuntimeException ex) {
                 long durationMs = elapsedDurationMs(startedAt);
+                ApprovalRequiredException approvalRequired = approvalRequired(ex);
+                if (approvalRequired != null) {
+                    log.info(
+                            "tool_call_waiting_for_approval stepId={} toolName={} actorType={} actorName={} durationMs={} approvalId={}",
+                            stepId,
+                            toolName,
+                            actorType,
+                            actorName,
+                            durationMs,
+                            approvalRequired.approval().approvalId()
+                    );
+                    progressPublisher.completed(
+                            stepId,
+                            label,
+                            ChatProgressPublisher.KIND_SYSTEM,
+                            durationMs,
+                            "Paused tool " + toolName + summarySuffix + " until approval.",
+                            actorType,
+                            actorName,
+                            metadata(toolName, toolInput, approvalRequired.getMessage(), "")
+                    );
+                    throw ex;
+                }
                 log.warn(
                         "tool_call_failed stepId={} toolName={} actorType={} actorName={} durationMs={} error={}",
                         stepId,
@@ -158,6 +182,17 @@ public class ToolCallInstrumentation {
                 throw ex;
             }
         }
+    }
+
+    private ApprovalRequiredException approvalRequired(Throwable ex) {
+        Throwable current = ex;
+        while (current != null) {
+            if (current instanceof ApprovalRequiredException approvalRequired) {
+                return approvalRequired;
+            }
+            current = current.getCause();
+        }
+        return null;
     }
 
     private ChatProgressMetadata metadata(

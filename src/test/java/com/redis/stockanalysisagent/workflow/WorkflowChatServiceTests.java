@@ -21,6 +21,7 @@ import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -40,7 +41,8 @@ class WorkflowChatServiceTests {
             externalDataCache,
             progressPublisher,
             workflowService,
-            sessionIndexService
+            sessionIndexService,
+            null
     );
 
     @Test
@@ -142,7 +144,8 @@ class WorkflowChatServiceTests {
                 any(),
                 anyBoolean(),
                 anyBoolean(),
-                any()
+                any(),
+                isNull()
         );
         ArgumentCaptor<ChatSessionMetadata> metadata = ArgumentCaptor.forClass(ChatSessionMetadata.class);
         verify(progressPublisher).workflow(metadata.capture());
@@ -209,7 +212,8 @@ class WorkflowChatServiceTests {
                 any(),
                 anyBoolean(),
                 anyBoolean(),
-                any()
+                any(),
+                isNull()
         );
     }
 

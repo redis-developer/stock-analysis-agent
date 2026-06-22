@@ -49,7 +49,7 @@ class ChatSessionControllerTests {
     void loginStoresUserAndRetrievedMemoriesLimitInSession() {
         MockHttpServletRequest request = new MockHttpServletRequest();
 
-        ChatContextResponse response = controller.login(new LoginRequest("alice", 7, false, false, false), request).getBody();
+        ChatContextResponse response = controller.login(new LoginRequest("alice", 7, false, false, false, false, null), request).getBody();
 
         assertThat(response).isNotNull();
         assertThat(response.userId()).isEqualTo("alice");
@@ -80,7 +80,7 @@ class ChatSessionControllerTests {
         request.addHeader("User-Agent", "Mozilla/5.0");
         request.addHeader("Accept-Language", "en-US,en;q=0.9");
 
-        trackingController.login(new LoginRequest(" alice ", 7, null, null, null), request);
+        trackingController.login(new LoginRequest(" alice ", 7, null, null, null, null, null), request);
 
         verify(loginUserTrackingService).recordLogin(
                 "alice",
@@ -94,9 +94,9 @@ class ChatSessionControllerTests {
     @Test
     void settingsStoresCachePreferencesInSession() {
         MockHttpServletRequest request = new MockHttpServletRequest();
-        controller.login(new LoginRequest("alice", 7, null, null, null), request);
+        controller.login(new LoginRequest("alice", 7, null, null, null, null, null), request);
 
-        ChatContextResponse response = controller.settings(new ChatSettingsRequest(5, false, false, false), request).getBody();
+        ChatContextResponse response = controller.settings(new ChatSettingsRequest(5, false, false, false, false, null), request).getBody();
 
         assertThat(response).isNotNull();
         assertThat(response.retrievedMemoriesLimit()).isEqualTo(5);
@@ -130,7 +130,7 @@ class ChatSessionControllerTests {
     @Test
     void sessionsEndpointReadsSessionIndex() {
         MockHttpServletRequest request = new MockHttpServletRequest();
-        controller.login(new LoginRequest("alice", 7, null, null, null), request);
+        controller.login(new LoginRequest("alice", 7, null, null, null, null, null), request);
         when(chatSessionService.listSessions("alice")).thenReturn(List.of("session-2", "session-1"));
         when(chatSessionService.summarizeSessions("alice", List.of("session-2", "session-1")))
                 .thenReturn(List.of(
@@ -155,7 +155,7 @@ class ChatSessionControllerTests {
     @Test
     void forceRefreshReloadsCachedSessions() {
         MockHttpServletRequest request = new MockHttpServletRequest();
-        controller.login(new LoginRequest("alice", 7, null, null, null), request);
+        controller.login(new LoginRequest("alice", 7, null, null, null, null, null), request);
         when(chatSessionService.listSessions("alice"))
                 .thenReturn(List.of("session-1"))
                 .thenReturn(List.of("session-2", "session-1"));
@@ -171,7 +171,7 @@ class ChatSessionControllerTests {
     @Test
     void sessionEndpointReturnsSessionMetadata() {
         MockHttpServletRequest request = new MockHttpServletRequest();
-        controller.login(new LoginRequest("alice", 7, null, null, null), request);
+        controller.login(new LoginRequest("alice", 7, null, null, null, null, null), request);
         when(chatSessionService.getSession("alice", "session-1"))
                 .thenReturn(new ChatSessionService.ChatSessionView(
                         List.of(),
@@ -189,7 +189,7 @@ class ChatSessionControllerTests {
     @Test
     void clearSessionRemovesSessionFromIndex() {
         MockHttpServletRequest request = new MockHttpServletRequest();
-        controller.login(new LoginRequest("alice", 7, null, null, null), request);
+        controller.login(new LoginRequest("alice", 7, null, null, null, null, null), request);
         when(chatSessionService.listSessions("alice"))
                 .thenReturn(List.of("session-2", "session-1"))
                 .thenReturn(List.of("session-1"));
@@ -211,7 +211,7 @@ class ChatSessionControllerTests {
                 new ChatSessionAccess(false)
         );
         MockHttpServletRequest request = new MockHttpServletRequest();
-        disabledController.login(new LoginRequest("alice", 7, null, null, null), request);
+        disabledController.login(new LoginRequest("alice", 7, null, null, null, null, null), request);
 
         assertThatThrownBy(() -> disabledController.sessions(request, false))
                 .isInstanceOfSatisfying(ResponseStatusException.class, exception ->

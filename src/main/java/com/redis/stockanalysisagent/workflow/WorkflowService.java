@@ -265,6 +265,36 @@ public class WorkflowService {
         return terminal(workflow, WorkflowStatus.COMPLETED, null);
     }
 
+    public WorkflowMetadata waitingForApproval(WorkflowMetadata workflow, ToolApproval approval) {
+        Instant now = Instant.now(clock);
+        WorkflowMetadata metadata = new WorkflowMetadata(
+                workflow.workflowId(),
+                workflow.clientRequestId(),
+                workflow.userId(),
+                workflow.sessionId(),
+                workflow.conversationId(),
+                WorkflowStatus.WAITING_FOR_APPROVAL,
+                workflow.previousWorkflowId(),
+                workflow.turnIndex(),
+                workflow.ownerId(),
+                workflow.leaseUntil(),
+                workflow.leaseVersion(),
+                workflow.attempt(),
+                workflow.createdAt(),
+                now,
+                null,
+                null
+        );
+        Map<String, String> fields = allFields(metadata);
+        put(fields, "approvalId", approval.approvalId());
+        put(fields, "approvalToolName", approval.toolName());
+        put(fields, "approvalStatus", approval.status());
+        put(fields, "approvalAgentType", approval.agentType());
+        put(fields, "approvalTicker", approval.ticker());
+        writeWaitingForApproval(metadata, fields);
+        return metadata;
+    }
+
     public WorkflowMetadata fail(WorkflowMetadata workflow, RuntimeException failure) {
         return terminal(workflow, WorkflowStatus.FAILED, errorMessage(failure));
     }
@@ -451,6 +481,42 @@ public class WorkflowService {
 
     public WorkflowMetadata markRecovered(WorkflowMetadata workflow, String recoveredByWorkflowId) {
         return terminal(workflow, WorkflowStatus.RECOVERED, null, recoveredByWorkflowId);
+    }
+
+    public WorkflowMetadata markApprovalResolved(String workflowId, String resumedWorkflowId) {
+        WorkflowMetadata workflow = readWorkflow(workflowId);
+        if (workflow == null || workflow.status() != WorkflowStatus.WAITING_FOR_APPROVAL) {
+            return workflow;
+        }
+
+        Instant now = Instant.now(clock);
+        WorkflowMetadata metadata = new WorkflowMetadata(
+                workflow.workflowId(),
+                workflow.clientRequestId(),
+                workflow.userId(),
+                workflow.sessionId(),
+                workflow.conversationId(),
+                WorkflowStatus.RECOVERED,
+                workflow.previousWorkflowId(),
+                workflow.turnIndex(),
+                workflow.ownerId(),
+                workflow.leaseUntil(),
+                workflow.leaseVersion(),
+                workflow.attempt(),
+                workflow.createdAt(),
+                now,
+                now,
+                null
+        );
+        Map<String, String> fields = allFields(metadata);
+        put(fields, RECOVERED_BY_WORKFLOW_ID, resumedWorkflowId);
+        writePipelined(metadata.workflowId(), fields);
+        log.info(
+                "workflow_approval_resolved workflowId={} resumedWorkflowId={}",
+                metadata.workflowId(),
+                blankToNull(resumedWorkflowId)
+        );
+        return metadata;
     }
 
     public Optional<ExecutionLock> tryAcquireExecutionLock(String idempotencyKey) {
@@ -671,6 +737,27 @@ public class WorkflowService {
                 metadata.leaseVersion(),
                 blankToNull(recoveredByWorkflowId),
                 metadata.failureReason() != null && !metadata.failureReason().isBlank()
+        );
+    }
+
+    private void writeWaitingForApproval(WorkflowMetadata metadata, Map<String, String> fields) {
+        redisTemplate.executePipelined(new SessionCallback<Object>() {
+            @Override
+            public Object execute(RedisOperations operations) throws DataAccessException {
+                String key = workflowKey(metadata.workflowId());
+                operations.opsForHash().putAll(key, fields);
+                operations.opsForZSet().remove(RUNNING_WORKFLOWS_KEY, metadata.workflowId());
+                operations.expire(key, WORKFLOW_TTL);
+                operations.expire(RUNNING_WORKFLOWS_KEY, WORKFLOW_TTL);
+                return null;
+            }
+        });
+        log.info(
+                "workflow_waiting_for_approval workflowId={} approvalId={} ownerId={} leaseVersion={}",
+                metadata.workflowId(),
+                fields.getOrDefault("approvalId", ""),
+                metadata.ownerId(),
+                metadata.leaseVersion()
         );
     }
 

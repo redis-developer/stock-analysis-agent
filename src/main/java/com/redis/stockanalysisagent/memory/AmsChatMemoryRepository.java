@@ -9,6 +9,7 @@ import com.redis.stockanalysisagent.chat.ChatExecutionStep;
 import com.redis.stockanalysisagent.memory.service.AgentMemoryService;
 import com.redis.stockanalysisagent.memory.service.AgentMemoryApiModels.SessionEvent;
 import com.redis.stockanalysisagent.session.ConversationId;
+import com.redis.stockanalysisagent.workflow.ToolApproval;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.memory.ChatMemoryRepository;
@@ -155,6 +156,32 @@ public class AmsChatMemoryRepository implements ChatMemoryRepository {
             boolean fromSemanticGuardrail,
             List<String> retrievedMemories
     ) {
+        saveTurn(
+                conversationId,
+                userMessage,
+                assistantResponse,
+                executionSteps,
+                tickers,
+                triggeredAgents,
+                fromSemanticCache,
+                fromSemanticGuardrail,
+                retrievedMemories,
+                null
+        );
+    }
+
+    public void saveTurn(
+            String conversationId,
+            String userMessage,
+            String assistantResponse,
+            List<ChatExecutionStep> executionSteps,
+            List<String> tickers,
+            List<String> triggeredAgents,
+            boolean fromSemanticCache,
+            boolean fromSemanticGuardrail,
+            List<String> retrievedMemories,
+            ToolApproval pendingApproval
+    ) {
         ConversationId parsed = ConversationId.parse(conversationId);
         String userId = parsed.userId();
         String sessionId = parsed.sessionId();
@@ -185,7 +212,8 @@ public class AmsChatMemoryRepository implements ChatMemoryRepository {
                                 triggeredAgents,
                                 fromSemanticCache,
                                 fromSemanticGuardrail,
-                                retrievedMemories
+                                retrievedMemories,
+                                pendingApproval
                         )
                 );
             }
@@ -323,7 +351,8 @@ public class AmsChatMemoryRepository implements ChatMemoryRepository {
             List<String> triggeredAgents,
             boolean fromSemanticCache,
             boolean fromSemanticGuardrail,
-            List<String> retrievedMemories
+            List<String> retrievedMemories,
+            ToolApproval pendingApproval
     ) {
         Map<String, Object> metadata = new LinkedHashMap<>();
         if (fromSemanticCache) {
@@ -353,6 +382,30 @@ public class AmsChatMemoryRepository implements ChatMemoryRepository {
         if (!normalizedMemories.isEmpty()) {
             metadata.put("retrievedMemories", normalizedMemories);
         }
+        if (pendingApproval != null) {
+            metadata.put("pendingApproval", approvalMetadata(pendingApproval));
+        }
+        return metadata;
+    }
+
+    private Map<String, Object> approvalMetadata(ToolApproval approval) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        putIfPresent(metadata, "approvalId", approval.approvalId());
+        putIfPresent(metadata, "workflowId", approval.workflowId());
+        putIfPresent(metadata, "activeWorkflowId", approval.activeWorkflowId());
+        putIfPresent(metadata, "userId", approval.userId());
+        putIfPresent(metadata, "sessionId", approval.sessionId());
+        putIfPresent(metadata, "conversationId", approval.conversationId());
+        putIfPresent(metadata, "toolName", approval.toolName());
+        putIfPresent(metadata, "agentType", approval.agentType());
+        putIfPresent(metadata, "ticker", approval.ticker());
+        putIfPresent(metadata, "question", approval.question());
+        putIfPresent(metadata, "arguments", approval.arguments());
+        putIfPresent(metadata, "status", approval.status());
+        putIfPresent(metadata, "createdAt", approval.createdAt());
+        putIfPresent(metadata, "updatedAt", approval.updatedAt());
+        putIfPresent(metadata, "decidedAt", approval.decidedAt());
+        putIfPresent(metadata, "resumedWorkflowId", approval.resumedWorkflowId());
         return metadata;
     }
 

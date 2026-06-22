@@ -7,6 +7,9 @@ import com.redis.stockanalysisagent.session.ChatSessionIndexService;
 import com.redis.stockanalysisagent.session.ConversationId;
 import com.redis.stockanalysisagent.session.dto.ChatSessionMetadata;
 import com.redis.stockanalysisagent.session.dto.ChatSessionWorkflowStep;
+import com.redis.stockanalysisagent.workflow.ApprovalRequiredException;
+import com.redis.stockanalysisagent.workflow.ToolApproval;
+import com.redis.stockanalysisagent.workflow.WorkflowApprovalService;
 import com.redis.stockanalysisagent.workflow.WorkflowContextHolder;
 import com.redis.stockanalysisagent.workflow.WorkflowMetadata;
 import com.redis.stockanalysisagent.workflow.WorkflowService;
@@ -34,6 +37,7 @@ public class ChatService {
     private final ChatProgressPublisher progressPublisher;
     private final WorkflowService workflowService;
     private final ChatSessionIndexService sessionIndexService;
+    private final WorkflowApprovalService approvalService;
 
     public ChatService(
             AmsChatMemoryRepository memoryRepository,
@@ -42,7 +46,7 @@ public class ChatService {
             ChatProgressPublisher progressPublisher,
             WorkflowService workflowService
     ) {
-        this(memoryRepository, chatAnalysisService, externalDataCache, progressPublisher, workflowService, null);
+        this(memoryRepository, chatAnalysisService, externalDataCache, progressPublisher, workflowService, null, null);
     }
 
     @Autowired
@@ -52,7 +56,8 @@ public class ChatService {
             ExternalDataCache externalDataCache,
             ChatProgressPublisher progressPublisher,
             WorkflowService workflowService,
-            ChatSessionIndexService sessionIndexService
+            ChatSessionIndexService sessionIndexService,
+            WorkflowApprovalService approvalService
     ) {
         this.memoryRepository = memoryRepository;
         this.chatAnalysisService = chatAnalysisService;
@@ -60,6 +65,7 @@ public class ChatService {
         this.progressPublisher = progressPublisher;
         this.workflowService = workflowService;
         this.sessionIndexService = sessionIndexService;
+        this.approvalService = approvalService;
     }
 
     public ChatTurn chat(
@@ -79,6 +85,51 @@ public class ChatService {
                 retrievedMemoriesLimit,
                 apiCachingEnabled,
                 semanticCachingEnabled,
+                List.of()
+        );
+    }
+
+    public ChatTurn chat(
+            String userId,
+            String sessionId,
+            String message,
+            String clientRequestId,
+            Integer retrievedMemoriesLimit,
+            boolean apiCachingEnabled,
+            boolean semanticCachingEnabled,
+            boolean requireApprovalEnabled
+    ) {
+        return chat(
+                userId,
+                sessionId,
+                message,
+                clientRequestId,
+                retrievedMemoriesLimit,
+                apiCachingEnabled,
+                semanticCachingEnabled,
+                requireApprovalEnabled ? WorkflowApprovalService.approvableTools() : List.of()
+        );
+    }
+
+    public ChatTurn chat(
+            String userId,
+            String sessionId,
+            String message,
+            String clientRequestId,
+            Integer retrievedMemoriesLimit,
+            boolean apiCachingEnabled,
+            boolean semanticCachingEnabled,
+            List<String> approvalRequiredTools
+    ) {
+        return chat(
+                userId,
+                sessionId,
+                message,
+                clientRequestId,
+                retrievedMemoriesLimit,
+                apiCachingEnabled,
+                semanticCachingEnabled,
+                approvalRequiredTools,
                 null,
                 "chat",
                 true,
@@ -98,6 +149,62 @@ public class ChatService {
             String replayCheckpointId,
             String originalUserMessage
     ) {
+        return replay(
+                userId,
+                sessionId,
+                message,
+                clientRequestId,
+                retrievedMemoriesLimit,
+                apiCachingEnabled,
+                semanticCachingEnabled,
+                List.of(),
+                replayedFromWorkflowId,
+                replayCheckpointId,
+                originalUserMessage
+        );
+    }
+
+    public ChatTurn replay(
+            String userId,
+            String sessionId,
+            String message,
+            String clientRequestId,
+            Integer retrievedMemoriesLimit,
+            boolean apiCachingEnabled,
+            boolean semanticCachingEnabled,
+            boolean requireApprovalEnabled,
+            String replayedFromWorkflowId,
+            String replayCheckpointId,
+            String originalUserMessage
+    ) {
+        return replay(
+                userId,
+                sessionId,
+                message,
+                clientRequestId,
+                retrievedMemoriesLimit,
+                apiCachingEnabled,
+                semanticCachingEnabled,
+                requireApprovalEnabled ? WorkflowApprovalService.approvableTools() : List.of(),
+                replayedFromWorkflowId,
+                replayCheckpointId,
+                originalUserMessage
+        );
+    }
+
+    public ChatTurn replay(
+            String userId,
+            String sessionId,
+            String message,
+            String clientRequestId,
+            Integer retrievedMemoriesLimit,
+            boolean apiCachingEnabled,
+            boolean semanticCachingEnabled,
+            List<String> approvalRequiredTools,
+            String replayedFromWorkflowId,
+            String replayCheckpointId,
+            String originalUserMessage
+    ) {
         ReplayOrigin replayOrigin = new ReplayOrigin(replayedFromWorkflowId, replayCheckpointId);
         return chat(
                 userId,
@@ -107,6 +214,7 @@ public class ChatService {
                 retrievedMemoriesLimit,
                 apiCachingEnabled,
                 semanticCachingEnabled,
+                approvalRequiredTools,
                 replayOrigin,
                 "replay",
                 true,
@@ -167,6 +275,7 @@ public class ChatService {
                 retrievedMemoriesLimit,
                 apiCachingEnabled,
                 semanticCachingEnabled,
+                List.of(),
                 replayOrigin,
                 "recovery",
                 true,
@@ -182,6 +291,7 @@ public class ChatService {
             Integer retrievedMemoriesLimit,
             boolean apiCachingEnabled,
             boolean semanticCachingEnabled,
+            List<String> approvalRequiredTools,
             ReplayOrigin replayOrigin,
             String mode,
             boolean saveTurnToMemory,
@@ -202,7 +312,11 @@ public class ChatService {
                     replayOrigin,
                     executionSteps
             );
-            WorkflowContextHolder.setWorkflowId(workflow.workflowId());
+            WorkflowContextHolder.setWorkflowId(
+                    workflow.workflowId(),
+                    replayOrigin == null ? null : replayOrigin.workflowId()
+            );
+            setApprovalRequiredTools(approvalRequiredTools);
             publishWorkflowSnapshot(workflow, replayOrigin, mode);
             log.info(
                     "chat_workflow_started mode={} userId={} sessionId={} conversationId={} workflowId={} clientRequestId={}",
@@ -238,6 +352,20 @@ public class ChatService {
                         semanticCacheKey(userId, normalizedMessage)
                 );
             } catch (RuntimeException ex) {
+                ApprovalRequiredException approvalRequired = approvalRequired(ex);
+                if (approvalRequired != null) {
+                    progressPublisher.completed(
+                            "REQUEST_ANALYSIS",
+                            "Analyzing request",
+                            ChatProgressPublisher.KIND_SYSTEM,
+                            elapsedDurationMs(analysisStartedAt),
+                            "Waiting for approval before continuing.",
+                            ChatProgressPublisher.ACTOR_TYPE_SYSTEM,
+                            ChatProgressPublisher.ACTOR_SYSTEM,
+                            ChatProgressMetadata.input(normalizedMessage)
+                    );
+                    throw approvalRequired;
+                }
                 progressPublisher.failed(
                         "REQUEST_ANALYSIS",
                         "Analyzing request",
@@ -253,6 +381,26 @@ public class ChatService {
                 externalDataCache.clearCachingEnabled();
             }
             executionSteps.addAll(analysisTurn.executionSteps());
+            ToolApproval pendingApproval = pendingApprovalForWorkflow(workflow);
+            if (pendingApproval != null) {
+                progressPublisher.completed(
+                        "REQUEST_ANALYSIS",
+                        "Analyzing request",
+                        ChatProgressPublisher.KIND_SYSTEM,
+                        elapsedDurationMs(analysisStartedAt),
+                        "Waiting for approval before continuing.",
+                        ChatProgressPublisher.ACTOR_TYPE_SYSTEM,
+                        ChatProgressPublisher.ACTOR_SYSTEM,
+                        ChatProgressMetadata.input(normalizedMessage)
+                );
+                log.info(
+                        "chat_workflow_pending_approval_detected workflowId={} approvalId={} toolName={}",
+                        workflow.workflowId(),
+                        pendingApproval.approvalId(),
+                        pendingApproval.toolName()
+                );
+                throw new ApprovalRequiredException(pendingApproval);
+            }
             progressPublisher.completed(
                     "REQUEST_ANALYSIS",
                     "Analyzing request",
@@ -294,7 +442,19 @@ public class ChatService {
                     analysisTurn.tickers(),
                     analysisTurn.triggeredAgents(),
                     workflow.workflowId(),
-                    workflow.status()
+                    workflow.status(),
+                    null
+            );
+        } catch (ApprovalRequiredException ex) {
+            return handleApprovalRequired(
+                    workflow,
+                    conversationId,
+                    normalizedMessage,
+                    memoryMessageOverride,
+                    saveTurnToMemory,
+                    executionSteps,
+                    ex.approval(),
+                    mode
             );
         } catch (RuntimeException ex) {
             if (workflow != null) {
@@ -309,8 +469,104 @@ public class ChatService {
             throw ex;
         } finally {
             closeLease(lease);
+            clearRequireApproval();
             WorkflowContextHolder.clear();
         }
+    }
+
+    private void setApprovalRequiredTools(List<String> toolNames) {
+        if (approvalService != null) {
+            approvalService.setApprovalRequiredTools(toolNames);
+        }
+    }
+
+    private void clearRequireApproval() {
+        if (approvalService != null) {
+            approvalService.clearRequireApproval();
+        }
+    }
+
+    private ToolApproval pendingApprovalForWorkflow(WorkflowMetadata workflow) {
+        if (approvalService == null || workflow == null) {
+            return null;
+        }
+        return approvalService.pendingApprovalForWorkflow(workflow.workflowId()).orElse(null);
+    }
+
+    private ChatTurn handleApprovalRequired(
+            WorkflowMetadata workflow,
+            String conversationId,
+            String normalizedMessage,
+            String memoryMessageOverride,
+            boolean saveTurnToMemory,
+            List<ChatExecutionStep> executionSteps,
+            ToolApproval approval,
+            String mode
+    ) {
+        if (workflow == null) {
+            throw new ApprovalRequiredException(approval);
+        }
+
+        WorkflowMetadata waiting = workflowService.waitingForApproval(workflow, approval);
+        ChatExecutionStep approvalStep = systemStep(
+                "APPROVAL_REQUIRED",
+                "Approval required",
+                0,
+                "Waiting for approval before running " + approval.toolName() + ".",
+                null
+        );
+        executionSteps.add(approvalStep);
+        progressPublisher.completed(
+                approvalStep.id(),
+                "Approval required",
+                ChatProgressPublisher.KIND_SYSTEM,
+                approvalStep.durationMs(),
+                approvalStep.summary(),
+                ChatProgressPublisher.ACTOR_TYPE_SYSTEM,
+                ChatProgressPublisher.ACTOR_SYSTEM,
+                ChatProgressMetadata.input(approval.arguments())
+        );
+
+        String response = approvalResponse(approval);
+        if (saveTurnToMemory) {
+            String memoryMessage = memoryMessageOverride == null || memoryMessageOverride.isBlank()
+                    ? normalizedMessage
+                    : memoryMessageOverride.trim();
+            saveTurn(
+                    conversationId,
+                    memoryMessage,
+                    response,
+                    executionSteps,
+                    approval.ticker().isBlank() ? List.of() : List.of(approval.ticker()),
+                    approval.agentType().isBlank() ? List.of() : List.of(approval.agentType()),
+                    false,
+                    false,
+                    memoryRepository.getLastRetrievedMemories(),
+                    approval
+            );
+        }
+        recordSessionCompleted(waiting.userId(), waiting.sessionId());
+        log.info(
+                "chat_workflow_waiting_for_approval mode={} workflowId={} approvalId={} toolName={}",
+                mode,
+                waiting.workflowId(),
+                approval.approvalId(),
+                approval.toolName()
+        );
+        return new ChatTurn(
+                conversationId,
+                response,
+                memoryRepository.getLastRetrievedMemories(),
+                false,
+                false,
+                null,
+                List.copyOf(executionSteps),
+                approval.ticker().isBlank() ? List.of() : List.of(approval.ticker()),
+                approval.agentType().isBlank() ? List.of() : List.of(approval.agentType()),
+                waiting.workflowId(),
+                waiting.status(),
+                approval
+        );
     }
 
     private void recordSessionStarted(String userId, String sessionId) {
@@ -342,6 +598,32 @@ public class ChatService {
             boolean fromSemanticGuardrail,
             List<String> retrievedMemories
     ) {
+        return saveTurn(
+                conversationId,
+                message,
+                response,
+                executionSteps,
+                tickers,
+                triggeredAgents,
+                fromSemanticCache,
+                fromSemanticGuardrail,
+                retrievedMemories,
+                null
+        );
+    }
+
+    private boolean saveTurn(
+            String conversationId,
+            String message,
+            String response,
+            List<ChatExecutionStep> executionSteps,
+            List<String> tickers,
+            List<String> triggeredAgents,
+            boolean fromSemanticCache,
+            boolean fromSemanticGuardrail,
+            List<String> retrievedMemories,
+            ToolApproval pendingApproval
+    ) {
         try {
             memoryRepository.saveTurn(
                     conversationId,
@@ -352,7 +634,8 @@ public class ChatService {
                     triggeredAgents,
                     fromSemanticCache,
                     fromSemanticGuardrail,
-                    retrievedMemories
+                    retrievedMemories,
+                    pendingApproval
             );
             return true;
         } catch (RuntimeException ex) {
@@ -574,6 +857,22 @@ public class ChatService {
                 """.formatted(message, response);
     }
 
+    private String approvalResponse(ToolApproval approval) {
+        String ticker = approval.ticker() == null || approval.ticker().isBlank() ? "" : " for " + approval.ticker();
+        return "Approval required before running " + approval.toolName() + ticker + ".";
+    }
+
+    private ApprovalRequiredException approvalRequired(Throwable ex) {
+        Throwable current = ex;
+        while (current != null) {
+            if (current instanceof ApprovalRequiredException approvalRequired) {
+                return approvalRequired;
+            }
+            current = current.getCause();
+        }
+        return null;
+    }
+
     private String startWorkflowSummary(WorkflowMetadata workflow, ReplayOrigin replayOrigin) {
         if (replayOrigin == null) {
             return "Created workflow " + workflow.workflowId() + ".";
@@ -724,7 +1023,8 @@ public class ChatService {
             List<String> tickers,
             List<String> triggeredAgents,
             String workflowId,
-            WorkflowStatus workflowStatus
+            WorkflowStatus workflowStatus,
+            ToolApproval pendingApproval
     ) {
         public ChatTurn {
             retrievedMemories = retrievedMemories == null ? List.of() : List.copyOf(retrievedMemories);

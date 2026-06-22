@@ -33,7 +33,7 @@ class ChatMemoryControllerTests {
     @Test
     void memoriesEndpointReturnsCurrentUsersLongTermMemories() {
         MockHttpServletRequest request = new MockHttpServletRequest();
-        sessionController.login(new LoginRequest("alice", 7, null, null, null), request);
+        sessionController.login(new LoginRequest("alice", 7, null, null, null, null, null), request);
         MemoryRecordResult memory = new MemoryRecordResult();
         memory.setId("memory-1");
         memory.setText("Alice owns NVDA.");
@@ -59,7 +59,7 @@ class ChatMemoryControllerTests {
     @Test
     void deleteMemoryUsesCurrentSessionUser() {
         MockHttpServletRequest request = new MockHttpServletRequest();
-        sessionController.login(new LoginRequest("alice", 7, null, null, null), request);
+        sessionController.login(new LoginRequest("alice", 7, null, null, null, null, null), request);
         when(agentMemoryService.deleteLongTermMemory("alice", "memory-1")).thenReturn(true);
 
         controller.deleteMemory("memory-1", request);
@@ -70,7 +70,7 @@ class ChatMemoryControllerTests {
     @Test
     void createMemoryUsesCurrentSessionUser() {
         MockHttpServletRequest request = new MockHttpServletRequest();
-        sessionController.login(new LoginRequest("alice", 7, null, null, null), request);
+        sessionController.login(new LoginRequest("alice", 7, null, null, null, null, null), request);
         when(agentMemoryService.createLongTermMemory(
                 "alice",
                 "session-1",
@@ -103,7 +103,7 @@ class ChatMemoryControllerTests {
     @Test
     void flushMemoriesReturnsDeletedCount() {
         MockHttpServletRequest request = new MockHttpServletRequest();
-        sessionController.login(new LoginRequest("alice", 7, null, null, null), request);
+        sessionController.login(new LoginRequest("alice", 7, null, null, null, null, null), request);
         when(agentMemoryService.deleteLongTermMemories("alice")).thenReturn(3);
 
         LongTermMemoryDeleteResponse response = controller.flushMemories(request).getBody();

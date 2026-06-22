@@ -768,6 +768,17 @@ body::before {
     color: #facc15;
 }
 
+.circuit-provider__toggle--approval.is-on,
+.circuit-provider__toggle--approval.is-partial {
+    border-color: rgba(250, 204, 21, 0.58);
+    color: #fde68a;
+}
+
+.circuit-provider__toggle--approval.is-on .identity-toggle__state,
+.circuit-provider__toggle--approval.is-partial .identity-toggle__state {
+    color: #fde68a;
+}
+
 .provider-dead-letter {
     display: grid;
     gap: var(--spacing-2);
@@ -1433,6 +1444,17 @@ body::before {
     border-left: 3px solid var(--color-primary-500);
 }
 
+.message--approval-only {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+.message--assistant.message--approval-only {
+    border-left: 0;
+}
+
 .message--activity {
     border-left-color: var(--color-brand);
 }
@@ -1567,6 +1589,36 @@ body::before {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
     gap: var(--spacing-3);
+}
+
+.message__approval {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-3);
+    flex-wrap: wrap;
+    padding: 0.9rem 1rem;
+    border: 1px solid rgba(250, 204, 21, 0.42);
+    border-radius: var(--radius-lg);
+    background: rgba(250, 204, 21, 0.08);
+}
+
+.message__approval-label {
+    color: var(--color-text);
+    font-weight: 650;
+    line-height: 1.4;
+}
+
+.message__approval-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-2);
+    flex-wrap: wrap;
+}
+
+.message__approval-button {
+    min-height: 2.3rem;
+    padding: 0.55rem 0.9rem;
 }
 
 .message__disclosure {
@@ -1866,6 +1918,12 @@ body::before {
     background: rgba(251, 146, 60, 0.12);
     border-color: rgba(251, 146, 60, 0.26);
     color: #fdba74;
+}
+
+.badge--approval {
+    background: rgba(250, 204, 21, 0.11);
+    border-color: rgba(250, 204, 21, 0.45);
+    color: #facc15;
 }
 
 .message__token-breakdown {

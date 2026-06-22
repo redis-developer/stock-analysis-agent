@@ -8,11 +8,30 @@
     const memoryTabAll = "all";
     const memoryTabCurrentChat = "current-chat";
     const circuitBreakerProviders = [
-        { providerId: "twelve-data", label: "Twelve Data" },
-        { providerId: "sec", label: "SEC" },
-        { providerId: "tavily", label: "Tavily" },
+        {
+            providerId: "twelve-data",
+            label: "Twelve Data",
+            approvalTools: ["runMarketDataAgent", "runTechnicalAnalysisAgent", "runBacktestAgent"]
+        },
+        {
+            providerId: "sec",
+            label: "SEC",
+            approvalTools: ["runFundamentalsAgent"]
+        },
+        {
+            providerId: "tavily",
+            label: "Tavily",
+            approvalTools: ["runNewsAgent"]
+        },
         { providerId: "lang-cache", label: "LangCache" },
         { providerId: "agent-memory", label: "Agent Memory" }
+    ];
+    const approvalToolOptions = [
+        { toolName: "runMarketDataAgent", label: "Market data" },
+        { toolName: "runFundamentalsAgent", label: "Fundamentals" },
+        { toolName: "runNewsAgent", label: "News" },
+        { toolName: "runTechnicalAnalysisAgent", label: "Technical" },
+        { toolName: "runBacktestAgent", label: "Backtest" }
     ];
 
     const state = {
@@ -27,6 +46,7 @@
         cacheLoading: false,
         messages: [],
         messagesBySession: {},
+        hiddenApprovalIds: new Set(),
         sessionWorkflowBySession: {},
         pendingSessions: {},
         pendingProgressBySession: {},
@@ -48,6 +68,7 @@
         apiCachingEnabled: true,
         semanticCachingEnabled: true,
         rateLimitingEnabled: true,
+        approvalRequiredTools: [],
         rateLimitLimit: defaultRateLimitLimit,
         rateLimitRemaining: defaultRateLimitLimit,
         providerUsage: {
@@ -70,6 +91,7 @@
         apiCacheToggle: document.getElementById("api-cache-toggle"),
         semanticCacheToggle: document.getElementById("semantic-cache-toggle"),
         rateLimitToggle: document.getElementById("rate-limit-toggle"),
+        requireApprovalTools: document.getElementById("require-approval-tools"),
         retrievedMemoriesLimitInput: document.getElementById("retrieved-memories-limit-input"),
         messages: document.getElementById("messages"),
         composer: document.getElementById("composer"),
@@ -156,9 +178,13 @@
         elements.questionInput.addEventListener("input", autoResizeTextarea);
         elements.questionInput.addEventListener("keydown", onComposerKeydown);
         elements.messages.addEventListener("click", onSuggestionClick);
+        elements.messages.addEventListener("click", onApprovalClick);
         elements.apiCacheToggle.addEventListener("click", onApiCacheToggleClick);
         elements.semanticCacheToggle.addEventListener("click", onSemanticCacheToggleClick);
         elements.rateLimitToggle.addEventListener("click", onRateLimitToggleClick);
+        if (elements.requireApprovalTools) {
+            elements.requireApprovalTools.addEventListener("click", onRequireApprovalToolClick);
+        }
         elements.secApiResetButton.addEventListener("click", onProviderUsageResetClick);
         elements.tavilyApiResetButton.addEventListener("click", onProviderUsageResetClick);
         elements.twelveDataApiResetButton.addEventListener("click", onProviderUsageResetClick);
@@ -313,6 +339,7 @@
         state.sessionId = null;
         state.messages = [];
         state.messagesBySession = {};
+        state.hiddenApprovalIds = new Set();
         state.sessionWorkflowBySession = {};
         state.pendingSessions = {};
         state.pendingProgressBySession = {};
@@ -328,6 +355,7 @@
         state.apiCachingEnabled = true;
         state.semanticCachingEnabled = true;
         state.rateLimitingEnabled = true;
+        state.approvalRequiredTools = [];
         state.circuitBreakers = defaultCircuitBreakers();
         resetRateLimitStatus();
         clearLegacyStoredSettings();
@@ -406,6 +434,52 @@
         setStatus("Prompt loaded");
     }
 
+    async function onApprovalClick(event) {
+        const button = event.target.closest("[data-approval-action]");
+        if (!button) {
+            return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        const action = button.dataset.approvalAction;
+        const workflowId = normalizeSessionValue(button.dataset.workflowId);
+        const approvalId = normalizeSessionValue(button.dataset.approvalId);
+        const targetSessionId = normalizeSessionValue(button.dataset.sessionId) || state.sessionId;
+        if (!workflowId || !approvalId || (action !== "approve" && action !== "reject")) {
+            return;
+        }
+
+        setApprovalButtonsDisabled(approvalId, true);
+        setSessionLoading(targetSessionId, true);
+        updateSessionProgress(targetSessionId, {
+            id: "APPROVAL_RESUME",
+            label: "Resuming workflow",
+            kind: "system",
+            status: "running",
+            summary: action === "approve" ? "Continuing after approval." : "Continuing after rejection."
+        });
+        setStatus("Resuming workflow");
+
+        let removedMessages = [];
+        try {
+            removedMessages = hideApprovalMessage(approvalId);
+            const response = await requestApprovalDecision(workflowId, approvalId, action);
+            appendAssistantResponse(response, targetSessionId);
+            if (isSessionManagementEnabled()) {
+                refreshSessions();
+            }
+            setStatus("Workflow resumed");
+        } catch (error) {
+            restoreApprovalMessages(approvalId, removedMessages);
+            setApprovalButtonsDisabled(approvalId, false);
+            setStatus("Approval failed", "error");
+        } finally {
+            setSessionLoading(targetSessionId, false);
+            clearSessionProgress(targetSessionId);
+        }
+    }
+
     function onApiCacheToggleClick() {
         state.apiCachingEnabled = !isApiCachingEnabled();
         renderIdentity();
@@ -420,6 +494,26 @@
 
     function onRateLimitToggleClick() {
         state.rateLimitingEnabled = !isRateLimitingEnabled();
+        renderIdentity();
+        persistChatSettings();
+    }
+
+    function onRequireApprovalToolClick(event) {
+        const button = event.target.closest("[data-approval-tool]");
+        if (!button) {
+            return;
+        }
+        const toolName = normalizeApprovalToolName(button.dataset.approvalTool);
+        if (!toolName) {
+            return;
+        }
+        if (isApprovalToolRequired(toolName)) {
+            state.approvalRequiredTools = state.approvalRequiredTools.filter(function (selectedToolName) {
+                return selectedToolName !== toolName;
+            });
+        } else {
+            state.approvalRequiredTools = normalizeApprovalRequiredTools(state.approvalRequiredTools.concat(toolName));
+        }
         renderIdentity();
         persistChatSettings();
     }
@@ -454,6 +548,12 @@
             return;
         }
 
+        const approvalButton = event.target.closest("[data-approval-provider]");
+        if (approvalButton) {
+            onProviderApprovalClick(approvalButton);
+            return;
+        }
+
         const button = event.target.closest("[data-circuit-provider]");
         if (!button) {
             return;
@@ -477,6 +577,26 @@
         } finally {
             button.disabled = false;
         }
+    }
+
+    function onProviderApprovalClick(button) {
+        const providerId = normalizeProviderId(button.dataset.approvalProvider);
+        const toolNames = approvalToolsForProvider(providerId);
+        if (toolNames.length === 0) {
+            return;
+        }
+
+        if (areAllApprovalToolsRequired(toolNames)) {
+            state.approvalRequiredTools = state.approvalRequiredTools.filter(function (selectedToolName) {
+                return !toolNames.includes(selectedToolName);
+            });
+        } else {
+            state.approvalRequiredTools = normalizeApprovalRequiredTools(state.approvalRequiredTools.concat(toolNames));
+        }
+
+        renderIdentity();
+        persistChatSettings();
+        setStatus(areAnyApprovalToolsRequired(toolNames) ? "Approval required" : "Approval disabled");
     }
 
     async function onLatencySimulationClick(button) {
@@ -830,36 +950,7 @@
         try {
             const clientRequestId = createClientRequestId();
             const response = await requestChatWithProgress(question, requestSessionId, clientRequestId);
-            const responseSessionId = normalizeSessionValue(response.sessionId) || requestSessionId;
-            state.userId = response.userId || activeUserId();
-            state.retrievedMemoriesLimit = normalizeRetrievedMemoriesLimit(
-                response.retrievedMemoriesLimit ?? state.retrievedMemoriesLimit
-            );
-            state.apiCachingEnabled = response.apiCachingEnabled !== false;
-            state.semanticCachingEnabled = response.semanticCachingEnabled !== false;
-            state.rateLimitingEnabled = response.rateLimitingEnabled !== false;
-            applyProviderUsage(response.providerUsage);
-            renderProviderUsage();
-            if (state.sessionId === requestSessionId) {
-                state.sessionId = responseSessionId;
-                persistSessionId(state.sessionId);
-                syncLoadingState();
-                renderIdentity();
-            }
-
-            const executionSteps = Array.isArray(response.executionSteps) ? response.executionSteps : [];
-            appendSessionMessage(responseSessionId, {
-                role: "assistant",
-                content: response.response || "No response returned.",
-                timestamp: new Date().toISOString(),
-                memories: response.retrievedMemories || [],
-                fromSemanticCache: Boolean(response.fromSemanticCache),
-                fromSemanticGuardrail: Boolean(response.fromSemanticGuardrail),
-                tokenUsage: normalizeTokenUsage(response.tokenUsage),
-                executionSteps: executionSteps,
-                activitySteps: assistantActivitySteps(requestSessionId, executionSteps),
-                responseTimeMs: Number.isFinite(response.responseTimeMs) ? response.responseTimeMs : null
-            });
+            const responseSessionId = appendAssistantResponse(response, requestSessionId);
             if (isSessionManagementEnabled()) {
                 refreshSessions();
             }
@@ -895,6 +986,46 @@
                 elements.questionInput.focus();
             }
         }
+    }
+
+    function appendAssistantResponse(response, fallbackSessionId) {
+        const requestSessionId = normalizeSessionValue(fallbackSessionId) || state.sessionId;
+        const responseSessionId = normalizeSessionValue(response.sessionId) || requestSessionId;
+        state.userId = response.userId || activeUserId();
+        state.retrievedMemoriesLimit = normalizeRetrievedMemoriesLimit(
+            response.retrievedMemoriesLimit ?? state.retrievedMemoriesLimit
+        );
+        state.apiCachingEnabled = response.apiCachingEnabled !== false;
+        state.semanticCachingEnabled = response.semanticCachingEnabled !== false;
+        state.rateLimitingEnabled = response.rateLimitingEnabled !== false;
+        state.approvalRequiredTools = normalizeApprovalRequiredTools(
+            response.approvalRequiredTools,
+            response.requireApprovalEnabled
+        );
+        applyProviderUsage(response.providerUsage);
+        renderProviderUsage();
+        if (state.sessionId === requestSessionId) {
+            state.sessionId = responseSessionId;
+            persistSessionId(state.sessionId);
+            syncLoadingState();
+            renderIdentity();
+        }
+
+        const executionSteps = Array.isArray(response.executionSteps) ? response.executionSteps : [];
+        appendSessionMessage(responseSessionId, {
+            role: "assistant",
+            content: response.response || "No response returned.",
+            timestamp: new Date().toISOString(),
+            memories: response.retrievedMemories || [],
+            fromSemanticCache: Boolean(response.fromSemanticCache),
+            fromSemanticGuardrail: Boolean(response.fromSemanticGuardrail),
+            tokenUsage: normalizeTokenUsage(response.tokenUsage),
+            executionSteps: executionSteps,
+            activitySteps: assistantActivitySteps(requestSessionId, executionSteps),
+            responseTimeMs: Number.isFinite(response.responseTimeMs) ? response.responseTimeMs : null,
+            pendingApproval: normalizePendingApproval(response.pendingApproval)
+        });
+        return responseSessionId;
     }
 
     async function requestChatWithProgress(message, sessionId, clientRequestId) {
@@ -937,7 +1068,9 @@
                     retrievedMemoriesLimit: activeRetrievedMemoriesLimit(),
                     apiCachingEnabled: isApiCachingEnabled(),
                     semanticCachingEnabled: isSemanticCachingEnabled(),
-                    rateLimitingEnabled: isRateLimitingEnabled()
+                    rateLimitingEnabled: isRateLimitingEnabled(),
+                    requireApprovalEnabled: isRequireApprovalEnabled(),
+                    approvalRequiredTools: approvalRequiredToolsPayload()
                 })
             });
         } catch (error) {
@@ -1062,8 +1195,38 @@
                 retrievedMemoriesLimit: activeRetrievedMemoriesLimit(),
                 apiCachingEnabled: isApiCachingEnabled(),
                 semanticCachingEnabled: isSemanticCachingEnabled(),
-                rateLimitingEnabled: isRateLimitingEnabled()
+                rateLimitingEnabled: isRateLimitingEnabled(),
+                requireApprovalEnabled: isRequireApprovalEnabled(),
+                approvalRequiredTools: approvalRequiredToolsPayload()
             })
+        });
+        applyRateLimitHeaders(response);
+
+        const contentType = response.headers.get("content-type") || "";
+        const rawBody = await response.text();
+        const body = contentType.includes("application/json") ? safeParseJson(rawBody) : null;
+
+        if (!response.ok) {
+            if (handleUnauthorizedResponse(response)) {
+                throw new Error("Login is required.");
+            }
+            throw new Error(extractErrorMessage(body, rawBody, response.status));
+        }
+
+        return body || {};
+    }
+
+    async function requestApprovalDecision(workflowId, approvalId, action) {
+        const response = await fetch(new URL(
+            "./api/workflows/"
+            + encodeURIComponent(workflowId)
+            + "/approvals/"
+            + encodeURIComponent(approvalId)
+            + "/"
+            + encodeURIComponent(action),
+            window.location.href
+        ), {
+            method: "POST"
         });
         applyRateLimitHeaders(response);
 
@@ -1092,7 +1255,9 @@
                 retrievedMemoriesLimit: activeRetrievedMemoriesLimit(),
                 apiCachingEnabled: isApiCachingEnabled(),
                 semanticCachingEnabled: isSemanticCachingEnabled(),
-                rateLimitingEnabled: isRateLimitingEnabled()
+                rateLimitingEnabled: isRateLimitingEnabled(),
+                requireApprovalEnabled: isRequireApprovalEnabled(),
+                approvalRequiredTools: approvalRequiredToolsPayload()
             })
         });
 
@@ -1729,6 +1894,7 @@
                 memories: stringListSignature(message && message.memories),
                 fromSemanticCache: Boolean(message && message.fromSemanticCache),
                 fromSemanticGuardrail: Boolean(message && message.fromSemanticGuardrail),
+                pendingApproval: approvalSignature(message && message.pendingApproval),
                 steps: stepListSignature(message && message.executionSteps),
                 tokenUsage: tokenUsageSignature(message && message.tokenUsage)
             };
@@ -1770,6 +1936,18 @@
             promptTokens: tokenUsage.promptTokens,
             completionTokens: tokenUsage.completionTokens,
             totalTokens: tokenUsage.totalTokens
+        };
+    }
+
+    function approvalSignature(approval) {
+        const pendingApproval = normalizePendingApproval(approval);
+        if (!pendingApproval) {
+            return null;
+        }
+        return {
+            approvalId: pendingApproval.approvalId,
+            workflowId: pendingApproval.workflowId,
+            status: pendingApproval.status
         };
     }
 
@@ -1886,7 +2064,9 @@
             }
 
             return normalizedStep;
-        }).filter(Boolean);
+        }).filter(function (message) {
+            return Boolean(message) && !isApprovalHidden(message.pendingApproval);
+        });
     }
 
     function inferRecoveredForStep(step, checkpointStepId, stateValue) {
@@ -2145,6 +2325,8 @@
         const nextExecutionSteps = Array.isArray(nextMessage.executionSteps) ? nextMessage.executionSteps : [];
         const localActivitySteps = Array.isArray(localMessage.activitySteps) ? localMessage.activitySteps : [];
         const nextActivitySteps = Array.isArray(nextMessage.activitySteps) ? nextMessage.activitySteps : [];
+        const nextApproval = normalizePendingApproval(nextMessage.pendingApproval);
+        const localApproval = normalizePendingApproval(localMessage.pendingApproval);
 
         return Object.assign({}, nextMessage, {
             memories: nextMemories.length > 0 ? nextMemories : localMemories,
@@ -2153,7 +2335,8 @@
             tokenUsage: nextMessage.tokenUsage || localMessage.tokenUsage || null,
             responseTimeMs: nextMessage.responseTimeMs != null ? nextMessage.responseTimeMs : localMessage.responseTimeMs,
             executionSteps: nextExecutionSteps.length > 0 ? nextExecutionSteps : localExecutionSteps,
-            activitySteps: nextActivitySteps.length > 0 ? nextActivitySteps : localActivitySteps
+            activitySteps: nextActivitySteps.length > 0 ? nextActivitySteps : localActivitySteps,
+            pendingApproval: nextApproval || localApproval
         });
     }
 
@@ -2161,12 +2344,16 @@
         const stickToBottom = shouldStickToBottom();
         elements.messages.replaceChildren();
 
-        if (state.messages.length === 0) {
+        const visibleMessages = state.messages.filter(function (message) {
+            return !isApprovalHidden(message.pendingApproval);
+        });
+
+        if (visibleMessages.length === 0 && !state.loading) {
             elements.messages.appendChild(buildEmptyState());
             return;
         }
 
-        for (const message of state.messages) {
+        for (const message of visibleMessages) {
             elements.messages.appendChild(buildMessage(message));
         }
 
@@ -2202,6 +2389,7 @@
             isRateLimitingEnabled(),
             "Rate limit"
         );
+        renderApprovalTools();
         renderRateLimitStatus();
         renderProviderUsage();
         renderCircuitBreakers();
@@ -2216,6 +2404,23 @@
         const remaining = Math.min(limit, normalizeRateLimitValue(state.rateLimitRemaining, limit));
         elements.rateLimitStatus.classList.toggle("is-off", !enabled);
         elements.rateLimitStatusValue.textContent = enabled ? remaining + " / " + limit : "Off";
+    }
+
+    function renderApprovalTools() {
+        if (!elements.requireApprovalTools) {
+            return;
+        }
+        elements.requireApprovalTools.replaceChildren();
+        approvalToolOptions.forEach(function (option) {
+            const button = document.createElement("button");
+            const enabled = isApprovalToolRequired(option.toolName);
+            button.type = "button";
+            button.className = "approval-tool" + (enabled ? "" : " is-off");
+            button.dataset.approvalTool = option.toolName;
+            button.setAttribute("aria-pressed", String(enabled));
+            button.textContent = option.label;
+            elements.requireApprovalTools.appendChild(button);
+        });
     }
 
     function renderProviderUsage() {
@@ -2309,6 +2514,29 @@
         }
         latencyToggle.title = (latencyEnabled ? "Disable" : "Enable") + " simulated latency for " + (status.label || providerId);
         row.appendChild(latencyToggle);
+
+        const approvalTools = approvalToolsForProvider(providerId);
+        if (approvalTools.length > 0) {
+            const approvalToggle = document.createElement("button");
+            const approvalState = providerApprovalState(approvalTools);
+            approvalToggle.className = "identity-toggle circuit-provider__toggle circuit-provider__toggle--approval";
+            approvalToggle.type = "button";
+            approvalToggle.dataset.approvalProvider = providerId;
+            approvalToggle.setAttribute("aria-pressed", approvalState === "partial" ? "mixed" : String(approvalState === "on"));
+            approvalToggle.classList.toggle("is-off", approvalState === "off");
+            approvalToggle.classList.toggle("is-on", approvalState === "on");
+            approvalToggle.classList.toggle("is-partial", approvalState === "partial");
+            approvalToggle.innerHTML = ""
+                + "<span class=\"identity-toggle__text\">Require approval</span>"
+                + "<span class=\"identity-toggle__state\"></span>"
+                + "<span class=\"identity-toggle__switch\" aria-hidden=\"true\"><span class=\"identity-toggle__knob\"></span></span>";
+            const approvalStateElement = approvalToggle.querySelector(".identity-toggle__state");
+            if (approvalStateElement) {
+                approvalStateElement.textContent = formatProviderApprovalState(approvalState);
+            }
+            approvalToggle.title = providerApprovalTitle(status.label || providerId, approvalTools, approvalState);
+            row.appendChild(approvalToggle);
+        }
 
         return row;
     }
@@ -2760,7 +2988,9 @@
                     retrievedMemoriesLimit: activeRetrievedMemoriesLimit(),
                     apiCachingEnabled: isApiCachingEnabled(),
                     semanticCachingEnabled: isSemanticCachingEnabled(),
-                    rateLimitingEnabled: isRateLimitingEnabled()
+                    rateLimitingEnabled: isRateLimitingEnabled(),
+                    requireApprovalEnabled: isRequireApprovalEnabled(),
+                    approvalRequiredTools: approvalRequiredToolsPayload()
                 })
             });
 
@@ -2794,6 +3024,10 @@
         state.apiCachingEnabled = context.apiCachingEnabled !== false;
         state.semanticCachingEnabled = context.semanticCachingEnabled !== false;
         state.rateLimitingEnabled = context.rateLimitingEnabled !== false;
+        state.approvalRequiredTools = normalizeApprovalRequiredTools(
+            context.approvalRequiredTools,
+            context.requireApprovalEnabled
+        );
         state.rateLimitLimit = normalizeRateLimitValue(context.rateLimitLimit, defaultRateLimitLimit);
         state.rateLimitRemaining = Math.min(
             state.rateLimitLimit,
@@ -3060,6 +3294,7 @@
         state.sessionId = null;
         state.messages = [];
         state.messagesBySession = {};
+        state.hiddenApprovalIds = new Set();
         state.sessionWorkflowBySession = {};
         state.pendingSessions = {};
         state.pendingProgressBySession = {};
@@ -3071,6 +3306,7 @@
         state.apiCachingEnabled = true;
         state.semanticCachingEnabled = true;
         state.rateLimitingEnabled = true;
+        state.approvalRequiredTools = [];
         state.circuitBreakers = defaultCircuitBreakers();
         resetRateLimitStatus();
         clearStoredSession();
@@ -3175,6 +3411,97 @@
         return state.rateLimitingEnabled !== false;
     }
 
+    function isRequireApprovalEnabled() {
+        return approvalRequiredToolsPayload().length > 0;
+    }
+
+    function isApprovalToolRequired(toolName) {
+        return approvalRequiredToolsPayload().includes(normalizeApprovalToolName(toolName));
+    }
+
+    function areAllApprovalToolsRequired(toolNames) {
+        const normalized = normalizeApprovalRequiredTools(toolNames);
+        return normalized.length > 0 && normalized.every(isApprovalToolRequired);
+    }
+
+    function areAnyApprovalToolsRequired(toolNames) {
+        return normalizeApprovalRequiredTools(toolNames).some(isApprovalToolRequired);
+    }
+
+    function providerApprovalState(toolNames) {
+        if (areAllApprovalToolsRequired(toolNames)) {
+            return "on";
+        }
+        if (areAnyApprovalToolsRequired(toolNames)) {
+            return "partial";
+        }
+        return "off";
+    }
+
+    function formatProviderApprovalState(approvalState) {
+        if (approvalState === "on") {
+            return "On";
+        }
+        if (approvalState === "partial") {
+            return "Some";
+        }
+        return "Off";
+    }
+
+    function providerApprovalTitle(providerLabel, toolNames, approvalState) {
+        const action = approvalState === "on" ? "Disable" : "Require";
+        return action + " approval for " + providerLabel + ": " + approvalToolLabels(toolNames).join(", ");
+    }
+
+    function approvalToolLabels(toolNames) {
+        const normalized = normalizeApprovalRequiredTools(toolNames);
+        return normalized.map(function (toolName) {
+            const option = approvalToolOptions.find(function (candidate) {
+                return candidate.toolName === toolName;
+            });
+            return option ? option.label : toolName;
+        });
+    }
+
+    function approvalToolsForProvider(providerId) {
+        const normalizedProvider = normalizeProviderId(providerId);
+        const provider = circuitBreakerProviders.find(function (candidate) {
+            return candidate.providerId === normalizedProvider;
+        });
+        return normalizeApprovalRequiredTools(provider && provider.approvalTools);
+    }
+
+    function approvalRequiredToolsPayload() {
+        return normalizeApprovalRequiredTools(state.approvalRequiredTools);
+    }
+
+    function normalizeApprovalRequiredTools(toolNames, requireApprovalEnabled) {
+        const source = Array.isArray(toolNames) ? toolNames : [];
+        const normalized = approvalToolOptions
+            .map(function (option) {
+                return option.toolName;
+            })
+            .filter(function (toolName) {
+                return source.some(function (selectedToolName) {
+                    return normalizeApprovalToolName(selectedToolName) === toolName;
+                });
+            });
+        if (normalized.length > 0 || requireApprovalEnabled !== true) {
+            return normalized;
+        }
+        return approvalToolOptions.map(function (option) {
+            return option.toolName;
+        });
+    }
+
+    function normalizeApprovalToolName(toolName) {
+        const value = typeof toolName === "string" ? toolName.trim() : "";
+        const option = approvalToolOptions.find(function (candidate) {
+            return candidate.toolName === value;
+        });
+        return option ? option.toolName : "";
+    }
+
     function applyRateLimitHeaders(response) {
         if (!response || !response.headers) {
             return;
@@ -3232,6 +3559,14 @@
     }
 
     function buildMessage(message) {
+        const approvalActions = buildApprovalActions(message);
+        if (approvalActions) {
+            const approvalArticle = document.createElement("article");
+            approvalArticle.className = "message message--assistant message--approval-only";
+            approvalArticle.appendChild(approvalActions);
+            return approvalArticle;
+        }
+
         const article = document.createElement("article");
         article.className = ["message", "message--" + message.role, message.variant ? "message--" + message.variant : ""]
             .filter(Boolean)
@@ -3303,6 +3638,58 @@
         }
 
         return article;
+    }
+
+    function buildApprovalActions(message) {
+        if (!message || message.role !== "assistant") {
+            return null;
+        }
+        const approval = normalizePendingApproval(message.pendingApproval);
+        if (!approval) {
+            return null;
+        }
+
+        const wrapper = document.createElement("div");
+        wrapper.className = "message__approval";
+
+        const label = document.createElement("div");
+        label.className = "message__approval-label";
+        label.textContent = approvalLabel(approval);
+        wrapper.appendChild(label);
+
+        const actions = document.createElement("div");
+        actions.className = "message__approval-actions";
+
+        if (approval.status === "PENDING") {
+            actions.appendChild(buildApprovalButton("approve", "Approve", approval));
+            actions.appendChild(buildApprovalButton("reject", "Reject", approval));
+        } else {
+            const status = document.createElement("span");
+            status.className = "badge badge--approval";
+            status.textContent = approval.status === "APPROVED" ? "Approved" : "Rejected";
+            actions.appendChild(status);
+        }
+
+        wrapper.appendChild(actions);
+        return wrapper;
+    }
+
+    function buildApprovalButton(action, label, approval) {
+        const button = document.createElement("button");
+        button.className = "btn " + (action === "approve" ? "btn-primary" : "btn-secondary") + " message__approval-button";
+        button.type = "button";
+        button.dataset.approvalAction = action;
+        button.dataset.approvalId = approval.approvalId;
+        button.dataset.workflowId = approval.workflowId;
+        button.dataset.sessionId = approval.sessionId || state.sessionId || "";
+        button.textContent = label;
+        return button;
+    }
+
+    function approvalLabel(approval) {
+        const tool = approval.toolName || "tool";
+        const ticker = approval.ticker ? " for " + approval.ticker : "";
+        return "Approval required before running " + tool + ticker + ".";
     }
 
     function buildSupplementPanels(message) {
@@ -4484,9 +4871,147 @@
                 tokenUsage: tokenUsage,
                 responseTimeMs: responseTimeMs,
                 executionSteps: executionSteps,
-                activitySteps: role === "assistant" ? executionStepsToActivitySteps(executionSteps) : []
+                activitySteps: role === "assistant" ? executionStepsToActivitySteps(executionSteps) : [],
+                pendingApproval: normalizePendingApproval(message && message.pendingApproval)
             };
-        }).filter(Boolean);
+        }).filter(function (message) {
+            return Boolean(message) && !isApprovalHidden(message.pendingApproval);
+        });
+    }
+
+    function normalizePendingApproval(approval) {
+        if (!approval || typeof approval !== "object") {
+            return null;
+        }
+        const approvalId = normalizeSessionValue(approval.approvalId);
+        const workflowId = normalizeSessionValue(approval.workflowId);
+        if (!approvalId || !workflowId) {
+            return null;
+        }
+        return {
+            approvalId: approvalId,
+            workflowId: workflowId,
+            activeWorkflowId: normalizeSessionValue(approval.activeWorkflowId),
+            userId: normalizeUserId(approval.userId),
+            sessionId: normalizeSessionValue(approval.sessionId),
+            conversationId: typeof approval.conversationId === "string" ? approval.conversationId.trim() : "",
+            toolName: typeof approval.toolName === "string" ? approval.toolName.trim() : "",
+            agentType: typeof approval.agentType === "string" ? approval.agentType.trim() : "",
+            ticker: typeof approval.ticker === "string" ? approval.ticker.trim() : "",
+            question: typeof approval.question === "string" ? approval.question.trim() : "",
+            arguments: typeof approval.arguments === "string" ? approval.arguments.trim() : "",
+            status: typeof approval.status === "string" && approval.status.trim()
+                ? approval.status.trim().toUpperCase()
+                : "PENDING",
+            createdAt: normalizeTimestamp(approval.createdAt),
+            updatedAt: normalizeTimestamp(approval.updatedAt),
+            decidedAt: normalizeTimestamp(approval.decidedAt),
+            resumedWorkflowId: normalizeSessionValue(approval.resumedWorkflowId)
+        };
+    }
+
+    function cssEscape(value) {
+        if (window.CSS && typeof window.CSS.escape === "function") {
+            return window.CSS.escape(String(value));
+        }
+        return String(value).replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
+    }
+
+    function isApprovalHidden(approval) {
+        const pendingApproval = normalizePendingApproval(approval);
+        return Boolean(pendingApproval && state.hiddenApprovalIds.has(pendingApproval.approvalId));
+    }
+
+    function hideApprovalMessage(approvalId) {
+        const targetApprovalId = normalizeSessionValue(approvalId);
+        if (!targetApprovalId) {
+            return [];
+        }
+
+        const removedMessages = removeApprovalMessages(targetApprovalId);
+        state.hiddenApprovalIds.add(targetApprovalId);
+        renderMessages();
+        return removedMessages;
+    }
+
+    function restoreApprovalMessages(approvalId, removedMessages) {
+        const targetApprovalId = normalizeSessionValue(approvalId);
+        if (!targetApprovalId) {
+            return;
+        }
+
+        state.hiddenApprovalIds.delete(targetApprovalId);
+        restoreRemovedApprovalMessages(removedMessages);
+        renderMessages();
+    }
+
+    function removeApprovalMessages(approvalId) {
+        const removed = [];
+        Object.keys(state.messagesBySession || {}).forEach(function (sessionId) {
+            const messages = sessionMessages(sessionId);
+            const kept = [];
+            messages.forEach(function (message, index) {
+                if (approvalMessageId(message) === approvalId) {
+                    removed.push({ sessionId: sessionId, index: index, message: message });
+                } else {
+                    kept.push(message);
+                }
+            });
+            state.messagesBySession[sessionId] = kept;
+            if (sessionId === state.sessionId) {
+                state.messages = kept;
+            }
+        });
+
+        if (!normalizeSessionValue(state.sessionId)) {
+            state.messages = state.messages.filter(function (message, index) {
+                if (approvalMessageId(message) === approvalId) {
+                    removed.push({ sessionId: "", index: index, message: message });
+                    return false;
+                }
+                return true;
+            });
+        }
+
+        return removed;
+    }
+
+    function restoreRemovedApprovalMessages(removedMessages) {
+        if (!Array.isArray(removedMessages) || removedMessages.length === 0) {
+            return;
+        }
+
+        removedMessages.forEach(function (entry) {
+            if (!entry || !entry.message) {
+                return;
+            }
+            const sessionId = normalizeSessionValue(entry.sessionId);
+            if (!sessionId) {
+                state.messages.splice(entry.index, 0, entry.message);
+                return;
+            }
+            const messages = sessionMessages(sessionId).slice();
+            messages.splice(entry.index, 0, entry.message);
+            state.messagesBySession[sessionId] = messages;
+            if (sessionId === state.sessionId) {
+                state.messages = messages;
+            }
+        });
+    }
+
+    function approvalMessageId(message) {
+        const approval = normalizePendingApproval(message && message.pendingApproval);
+        return approval ? approval.approvalId : "";
+    }
+
+    function setApprovalButtonsDisabled(approvalId, disabled) {
+        const targetApprovalId = normalizeSessionValue(approvalId);
+        if (!targetApprovalId) {
+            return;
+        }
+        elements.messages.querySelectorAll("[data-approval-id=\"" + cssEscape(targetApprovalId) + "\"]").forEach(function (button) {
+            button.disabled = Boolean(disabled);
+        });
     }
 
     function normalizeStringList(values) {
