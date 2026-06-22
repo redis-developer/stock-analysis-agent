@@ -80,6 +80,7 @@ public class ChatService {
                 apiCachingEnabled,
                 semanticCachingEnabled,
                 null,
+                "chat",
                 true,
                 null
         );
@@ -94,7 +95,8 @@ public class ChatService {
             boolean apiCachingEnabled,
             boolean semanticCachingEnabled,
             String replayedFromWorkflowId,
-            String replayCheckpointId
+            String replayCheckpointId,
+            String originalUserMessage
     ) {
         ReplayOrigin replayOrigin = new ReplayOrigin(replayedFromWorkflowId, replayCheckpointId);
         return chat(
@@ -106,7 +108,40 @@ public class ChatService {
                 apiCachingEnabled,
                 semanticCachingEnabled,
                 replayOrigin,
-                false,
+                "replay",
+                true,
+                replayVisibleMessage(replayedFromWorkflowId, replayCheckpointId, originalUserMessage)
+        );
+    }
+
+    private String replayVisibleMessage(String workflowId, String checkpointId, String originalUserMessage) {
+        if (originalUserMessage != null && !originalUserMessage.isBlank()) {
+            return originalUserMessage.trim();
+        }
+        return "Replay workflow " + workflowId + " from checkpoint " + checkpointId + ".";
+    }
+
+    public ChatTurn replay(
+            String userId,
+            String sessionId,
+            String message,
+            String clientRequestId,
+            Integer retrievedMemoriesLimit,
+            boolean apiCachingEnabled,
+            boolean semanticCachingEnabled,
+            String replayedFromWorkflowId,
+            String replayCheckpointId
+    ) {
+        return replay(
+                userId,
+                sessionId,
+                message,
+                clientRequestId,
+                retrievedMemoriesLimit,
+                apiCachingEnabled,
+                semanticCachingEnabled,
+                replayedFromWorkflowId,
+                replayCheckpointId,
                 null
         );
     }
@@ -133,6 +168,7 @@ public class ChatService {
                 apiCachingEnabled,
                 semanticCachingEnabled,
                 replayOrigin,
+                "recovery",
                 true,
                 originalUserMessage
         );
@@ -147,6 +183,7 @@ public class ChatService {
             boolean apiCachingEnabled,
             boolean semanticCachingEnabled,
             ReplayOrigin replayOrigin,
+            String mode,
             boolean saveTurnToMemory,
             String memoryMessageOverride
     ) {
@@ -155,7 +192,6 @@ public class ChatService {
         List<ChatExecutionStep> executionSteps = new ArrayList<>();
         WorkflowMetadata workflow = null;
         WorkflowService.Lease lease = null;
-        String mode = executionMode(replayOrigin, saveTurnToMemory);
         try {
             recordSessionStarted(userId, sessionId);
             workflow = startWorkflow(
@@ -295,13 +331,6 @@ public class ChatService {
         }
     }
 
-    private String executionMode(ReplayOrigin replayOrigin, boolean saveTurnToMemory) {
-        if (replayOrigin == null) {
-            return "chat";
-        }
-        return saveTurnToMemory ? "recovery" : "replay";
-    }
-
     private boolean saveTurn(
             String conversationId,
             String message,
@@ -310,7 +339,8 @@ public class ChatService {
             List<String> tickers,
             List<String> triggeredAgents,
             boolean fromSemanticCache,
-            boolean fromSemanticGuardrail
+            boolean fromSemanticGuardrail,
+            List<String> retrievedMemories
     ) {
         try {
             memoryRepository.saveTurn(
@@ -321,7 +351,8 @@ public class ChatService {
                     tickers,
                     triggeredAgents,
                     fromSemanticCache,
-                    fromSemanticGuardrail
+                    fromSemanticGuardrail,
+                    retrievedMemories
             );
             return true;
         } catch (RuntimeException ex) {
@@ -355,7 +386,8 @@ public class ChatService {
                 analysisTurn.tickers(),
                 analysisTurn.triggeredAgents(),
                 analysisTurn.fromSemanticCache(),
-                analysisTurn.fromSemanticGuardrail()
+                analysisTurn.fromSemanticGuardrail(),
+                memoryRepository.getLastRetrievedMemories()
         );
         ChatExecutionStep saveStep = systemStep(
                 "TURN_SAVE",

@@ -121,7 +121,8 @@ class WorkflowChatServiceTests {
                 true,
                 false,
                 "source-workflow",
-                "source-checkpoint"
+                "source-checkpoint",
+                "original user question"
         );
 
         assertThat(turn.workflowId()).isEqualTo("workflow-1");
@@ -130,8 +131,19 @@ class WorkflowChatServiceTests {
                 .extracting(ChatExecutionStep::summary)
                 .contains(
                         "Created replay workflow workflow-1 from source-workflow at checkpoint source-checkpoint.",
-                        "Skipped working-memory persistence for internal checkpoint replay."
+                        "Persisted the user message and assistant response to working memory."
                 );
+        verify(memoryRepository).saveTurn(
+                eq("alice:session-1"),
+                eq("original user question"),
+                eq("response"),
+                any(),
+                any(),
+                any(),
+                anyBoolean(),
+                anyBoolean(),
+                any()
+        );
         ArgumentCaptor<ChatSessionMetadata> metadata = ArgumentCaptor.forClass(ChatSessionMetadata.class);
         verify(progressPublisher).workflow(metadata.capture());
         assertThat(metadata.getValue().latestWorkflowId()).isEqualTo("workflow-1");
@@ -147,7 +159,6 @@ class WorkflowChatServiceTests {
                 "source-workflow",
                 "source-checkpoint"
         );
-        verify(memoryRepository, never()).saveTurn(any(), any(), any(), any(), any(), any(), anyBoolean(), anyBoolean());
     }
 
     @Test
@@ -197,7 +208,8 @@ class WorkflowChatServiceTests {
                 any(),
                 any(),
                 anyBoolean(),
-                anyBoolean()
+                anyBoolean(),
+                any()
         );
     }
 

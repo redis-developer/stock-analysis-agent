@@ -79,6 +79,7 @@ The dashboard is provisioned from:
 
 ```text
 infra/grafana/dashboards/redis-workflow-streams.json
+infra/grafana/dashboards/redis-provider-dead-letter.json
 ```
 
 It uses the Redis datasource plugin and these commands:
@@ -95,6 +96,8 @@ XREVRANGE stock-analysis:workflows:{workflowId}:checkpoints + - COUNT 1
 ZRANGEBYSCORE stock-analysis:workflows:running -inf {now}
 SET stock-analysis:workflow-execution-locks:{operation}:{workflowId}:{checkpointId} {workerToken} NX PX {ttl}
 HGETALL stock-analysis:workflow-idempotency:{operation}:{workflowId}:{checkpointId}
+XLEN stock-analysis:provider-dead-letter
+XREVRANGE stock-analysis:provider-dead-letter + - COUNT 100
 ```
 
 The workflow event sequence panel embeds the Spring app endpoint at `/api/workflows/{workflowId}/timeline`. That endpoint reads the Redis stream and renders each event with elapsed time, actor, event type, step id, duration, summary, and payload details.
@@ -106,7 +109,9 @@ It also renders the owner id, lease expiry, lease version, attempt, replay origi
 
 The checkpoint replay panel embeds `/api/workflows/{workflowId}/replay-context`. That view reads the latest checkpoint, workflow metadata, session workflow list, and events recorded after the checkpoint.
 
-The replay button calls `POST /api/workflows/{workflowId}/replay`. The app creates a new workflow in the same session and conversation, sends the latest checkpoint back through the normal chat execution path, and writes `replayedFromWorkflowId` and `replayCheckpointId` to the new workflow hash. The original workflow is not mutated. Internal replay prompts are not persisted as visible chat turns.
+The replay button calls `POST /api/workflows/{workflowId}/replay`. The app creates a new workflow in the same session and conversation, sends the latest checkpoint back through the normal chat execution path, and writes `replayedFromWorkflowId` and `replayCheckpointId` to the new workflow hash. The original workflow is not mutated. The chat turn is saved under the original user message, so the internal replay prompt is not shown in the chat UI.
+
+The provider dead letter dashboard reads `stock-analysis:provider-dead-letter`. Each stream entry includes `workflowId`, `stepId`, `providerId`, `cacheName`, `cacheKey`, `attempts`, `reason`, and `failedAt`.
 
 ## Crash Recovery
 

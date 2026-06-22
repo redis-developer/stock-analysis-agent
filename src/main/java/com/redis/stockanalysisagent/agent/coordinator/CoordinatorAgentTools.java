@@ -613,7 +613,7 @@ public class CoordinatorAgentTools {
             AgentType agentType = recoveredAgentType(fields.get("label"), fields.get("Actor"), fields.get("Step"));
             String ticker = recoveredTicker(fields.get("Step"), fields.get("Input"));
             String output = fields.getOrDefault("Output", "");
-            if (agentType != null && !ticker.isBlank() && !output.isBlank()) {
+            if (agentType != null && !ticker.isBlank() && !output.isBlank() && !isTemporaryProviderFailure(output)) {
                 storeEvidence(agentType, ticker, output);
             }
         }
@@ -718,6 +718,24 @@ public class CoordinatorAgentTools {
 
             Matcher matcher = pattern.matcher(input);
             return matcher.find() ? matcher.group(1).trim().toUpperCase(Locale.ROOT) : "";
+        }
+
+        private static boolean isTemporaryProviderFailure(String text) {
+            if (text == null || text.isBlank()) {
+                return false;
+            }
+
+            String normalized = text.toLowerCase(Locale.ROOT);
+            return normalized.contains("provider outage")
+                    || normalized.contains("data provider outage")
+                    || normalized.contains("unable to retrieve")
+                    || normalized.contains("currently unable")
+                    || normalized.contains("temporarily unavailable")
+                    || normalized.contains("temporary service outage")
+                    || normalized.contains("service outage")
+                    || normalized.contains("rate limit")
+                    || normalized.contains("timed out")
+                    || normalized.contains("timeout");
         }
     }
 }

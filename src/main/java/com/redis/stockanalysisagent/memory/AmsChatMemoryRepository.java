@@ -131,6 +131,30 @@ public class AmsChatMemoryRepository implements ChatMemoryRepository {
             boolean fromSemanticCache,
             boolean fromSemanticGuardrail
     ) {
+        saveTurn(
+                conversationId,
+                userMessage,
+                assistantResponse,
+                executionSteps,
+                tickers,
+                triggeredAgents,
+                fromSemanticCache,
+                fromSemanticGuardrail,
+                List.of()
+        );
+    }
+
+    public void saveTurn(
+            String conversationId,
+            String userMessage,
+            String assistantResponse,
+            List<ChatExecutionStep> executionSteps,
+            List<String> tickers,
+            List<String> triggeredAgents,
+            boolean fromSemanticCache,
+            boolean fromSemanticGuardrail,
+            List<String> retrievedMemories
+    ) {
         ConversationId parsed = ConversationId.parse(conversationId);
         String userId = parsed.userId();
         String sessionId = parsed.sessionId();
@@ -160,7 +184,8 @@ public class AmsChatMemoryRepository implements ChatMemoryRepository {
                                 tickers,
                                 triggeredAgents,
                                 fromSemanticCache,
-                                fromSemanticGuardrail
+                                fromSemanticGuardrail,
+                                retrievedMemories
                         )
                 );
             }
@@ -297,7 +322,8 @@ public class AmsChatMemoryRepository implements ChatMemoryRepository {
             List<String> tickers,
             List<String> triggeredAgents,
             boolean fromSemanticCache,
-            boolean fromSemanticGuardrail
+            boolean fromSemanticGuardrail,
+            List<String> retrievedMemories
     ) {
         Map<String, Object> metadata = new LinkedHashMap<>();
         if (fromSemanticCache) {
@@ -322,6 +348,10 @@ public class AmsChatMemoryRepository implements ChatMemoryRepository {
         List<String> normalizedAgents = normalizeMetadataValues(triggeredAgents);
         if (!normalizedAgents.isEmpty()) {
             metadata.put("triggeredAgents", normalizedAgents);
+        }
+        List<String> normalizedMemories = normalizeTextValues(retrievedMemories);
+        if (!normalizedMemories.isEmpty()) {
+            metadata.put("retrievedMemories", normalizedMemories);
         }
         return metadata;
     }
@@ -388,6 +418,18 @@ public class AmsChatMemoryRepository implements ChatMemoryRepository {
         return values.stream()
                 .filter(value -> value != null && !value.isBlank())
                 .map(value -> value.trim().toUpperCase())
+                .distinct()
+                .toList();
+    }
+
+    private List<String> normalizeTextValues(List<String> values) {
+        if (values == null || values.isEmpty()) {
+            return List.of();
+        }
+
+        return values.stream()
+                .filter(value -> value != null && !value.isBlank())
+                .map(String::trim)
                 .distinct()
                 .toList();
     }

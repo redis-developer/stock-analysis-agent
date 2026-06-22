@@ -1,6 +1,7 @@
 package com.redis.stockanalysisagent.workflow;
 
 import com.redis.stockanalysisagent.chat.ChatService;
+import com.redis.stockanalysisagent.session.ConversationId;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Range;
@@ -20,6 +21,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/workflows")
@@ -71,9 +73,8 @@ public class WorkflowReplayController {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Workflow has no checkpoint to replay.");
         }
 
-        String userId = value(metadata, "userId");
-        String sessionId = value(metadata, "sessionId");
-        if (userId.isBlank() || sessionId.isBlank()) {
+        ReplayTarget target = replayTarget(metadata);
+        if (target.userId().isBlank() || target.sessionId().isBlank()) {
             log.warn("workflow_replay_rejected workflowId={} reason=session_metadata_missing", workflowId);
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Workflow metadata is missing user or session.");
         }
@@ -82,56 +83,29 @@ public class WorkflowReplayController {
                 "workflow_replay_started workflowId={} checkpointId={} userId={} sessionId={}",
                 workflowId,
                 checkpoint.checkpointId(),
-                userId,
-                sessionId
+                target.userId(),
+                target.sessionId()
         );
+        String executionLockKey = replayExecutionLockKey(workflowId, checkpoint);
         String clientRequestId = replayClientRequestId(workflowId, checkpoint);
-        Optional<WorkflowService.IdempotentWorkflow> existing =
-                workflowService.completedIdempotentWorkflow(clientRequestId);
-        if (existing.isPresent()) {
-            log.info(
-                    "workflow_replay_idempotent_hit workflowId={} replayWorkflowId={} checkpointId={}",
-                    workflowId,
-                    existing.get().workflowId(),
-                    checkpoint.checkpointId()
-            );
-            return replayResponse(workflowId, checkpoint, existing.get());
-        }
-
-        Optional<WorkflowService.ExecutionLock> lock = workflowService.tryAcquireExecutionLock(clientRequestId);
+        Optional<WorkflowService.ExecutionLock> lock = workflowService.tryAcquireExecutionLock(executionLockKey);
         if (lock.isEmpty()) {
             log.info("workflow_replay_lock_busy workflowId={} checkpointId={}", workflowId, checkpoint.checkpointId());
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Replay is already running for this checkpoint.");
         }
 
         try (WorkflowService.ExecutionLock ignored = lock.get()) {
-            existing = workflowService.completedIdempotentWorkflow(clientRequestId);
-            if (existing.isPresent()) {
-                log.info(
-                        "workflow_replay_idempotent_hit workflowId={} replayWorkflowId={} checkpointId={}",
-                        workflowId,
-                        existing.get().workflowId(),
-                        checkpoint.checkpointId()
-                );
-                return replayResponse(workflowId, checkpoint, existing.get());
-            }
-
             ChatService.ChatTurn turn = chatService.replay(
-                    userId,
-                    sessionId,
+                    target.userId(),
+                    target.sessionId(),
                     checkpointService.replayMessage(workflowId, metadata, checkpoint),
                     clientRequestId,
                     REPLAY_RETRIEVED_MEMORIES_LIMIT,
                     true,
                     false,
                     workflowId,
-                    checkpoint.checkpointId()
-            );
-            workflowService.recordCompletedIdempotentWorkflow(
-                    clientRequestId,
-                    turn.workflowId(),
-                    turn.conversationId(),
-                    turn.workflowStatus()
+                    checkpoint.checkpointId(),
+                    checkpointService.originalUserMessage(workflowId).orElse("")
             );
             log.info(
                     "workflow_replay_completed workflowId={} replayWorkflowId={} checkpointId={} status={}",
@@ -150,18 +124,21 @@ public class WorkflowReplayController {
         }
     }
 
-    private ReplayResponse replayResponse(
-            String workflowId,
-            WorkflowCheckpoint checkpoint,
-            WorkflowService.IdempotentWorkflow existing
-    ) {
-        return new ReplayResponse(
-                workflowId,
-                existing.workflowId(),
-                checkpoint.checkpointId(),
-                existing.status(),
-                existing.conversationId()
-        );
+    private ReplayTarget replayTarget(Map<Object, Object> metadata) {
+        String metadataUserId = value(metadata, "userId");
+        String metadataSessionId = value(metadata, "sessionId");
+        String conversationId = value(metadata, "conversationId");
+        if (!conversationId.isBlank()) {
+            ConversationId parsed = ConversationId.parse(conversationId);
+            String userId = parsed.userId() == null || parsed.userId().isBlank()
+                    ? metadataUserId
+                    : parsed.userId();
+            String sessionId = parsed.sessionId() == null || parsed.sessionId().isBlank()
+                    ? metadataSessionId
+                    : parsed.sessionId();
+            return new ReplayTarget(userId, sessionId);
+        }
+        return new ReplayTarget(metadataUserId, metadataSessionId);
     }
 
     private List<ReplayEvent> eventsAfter(String workflowId, Instant checkpointTimestamp) {
@@ -256,6 +233,8 @@ public class WorkflowReplayController {
                   color: #f0f3f8;
                   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
                 }
+                a { color: #9cc8ff; text-decoration: none; }
+                a:hover { text-decoration: underline; }
                 .grid {
                   display: grid;
                   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -382,10 +361,16 @@ public class WorkflowReplayController {
                 .append("try{const response=await fetch('/api/workflows/'+encodeURIComponent(workflowId)+'/replay',{method:'POST'});")
                 .append("const body=await response.json().catch(()=>({message:'Replay failed.'}));")
                 .append("if(!response.ok){throw new Error(body.message||body.error||response.statusText);}")
-                .append("result.innerHTML='Created replay workflow <code>'+escapeHtml(body.replayWorkflowId)+'</code>. Select it in the workflow filter after refresh.';")
+                .append("const replayWorkflowId=String(body.replayWorkflowId||'');")
+                .append("const href=workflowDashboardUrl(replayWorkflowId);")
+                .append("result.innerHTML='Created replay workflow <a href=\"'+escapeAttribute(href)+'\" target=\"_top\"><code>'+escapeHtml(replayWorkflowId)+'</code></a>.';")
                 .append("}catch(error){result.textContent=error.message||'Replay failed.';button.disabled=false;}")
                 .append("});}")
+                .append("function workflowDashboardUrl(id){const path='/d/stock-analysis-workflows/workflow-event-log?var-workflow_id='+encodeURIComponent(id)+'&refresh=5s';")
+                .append("try{if(document.referrer){return new URL(path,new URL(document.referrer).origin).toString();}}catch(error){}")
+                .append("return path;}")
                 .append("function escapeHtml(value){return String(value||'').replace(/[&<>\"']/g,(char)=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[char]));}")
+                .append("function escapeAttribute(value){return escapeHtml(value).replace(/`/g,'&#96;');}")
                 .append("</script>");
     }
 
@@ -429,7 +414,11 @@ public class WorkflowReplayController {
     }
 
     private String replayClientRequestId(String workflowId, WorkflowCheckpoint checkpoint) {
-        return "replay:" + workflowId + ":" + checkpoint.checkpointId();
+        return "replay-visible:" + workflowId + ":" + checkpoint.checkpointId() + ":" + UUID.randomUUID();
+    }
+
+    private String replayExecutionLockKey(String workflowId, WorkflowCheckpoint checkpoint) {
+        return "replay-visible-lock:" + workflowId + ":" + checkpoint.checkpointId();
     }
 
     private Instant timestamp(Map<Object, Object> values, Long fallbackTimestamp) {
@@ -487,5 +476,8 @@ public class WorkflowReplayController {
             String replayWorkflowStatus,
             String conversationId
     ) {
+    }
+
+    private record ReplayTarget(String userId, String sessionId) {
     }
 }

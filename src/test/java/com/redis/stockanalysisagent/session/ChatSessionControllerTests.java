@@ -6,6 +6,7 @@ import com.redis.stockanalysisagent.session.controller.vo.ChatSessionsResponse;
 import com.redis.stockanalysisagent.session.controller.vo.ChatSettingsRequest;
 import com.redis.stockanalysisagent.session.controller.vo.LoginRequest;
 import com.redis.stockanalysisagent.session.dto.ChatSessionMetadata;
+import com.redis.stockanalysisagent.session.dto.ChatSessionSummary;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -16,7 +17,6 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -132,16 +132,24 @@ class ChatSessionControllerTests {
         MockHttpServletRequest request = new MockHttpServletRequest();
         controller.login(new LoginRequest("alice", 7, null, null, null), request);
         when(chatSessionService.listSessions("alice")).thenReturn(List.of("session-2", "session-1"));
+        when(chatSessionService.summarizeSessions("alice", List.of("session-2", "session-1")))
+                .thenReturn(List.of(
+                        new ChatSessionSummary("session-2", "2026-06-22T18:11:27Z"),
+                        new ChatSessionSummary("session-1", "2026-06-22T18:09:50Z")
+                ));
 
         ChatSessionsResponse firstResponse = controller.sessions(request, false).getBody();
         ChatSessionsResponse secondResponse = controller.sessions(request, false).getBody();
 
         assertThat(firstResponse).isNotNull();
         assertThat(firstResponse.sessions()).containsExactly("session-2", "session-1");
+        assertThat(firstResponse.sessionDetails())
+                .extracting(ChatSessionSummary::sessionId)
+                .containsExactly("session-2", "session-1");
         assertThat(secondResponse).isNotNull();
         assertThat(secondResponse.sessions()).containsExactly("session-2", "session-1");
         verify(chatSessionService, times(2)).listSessions("alice");
-        verify(chatSessionService, never()).summarizeSessions("alice", List.of("session-2", "session-1"));
+        verify(chatSessionService, times(2)).summarizeSessions("alice", List.of("session-2", "session-1"));
     }
 
     @Test

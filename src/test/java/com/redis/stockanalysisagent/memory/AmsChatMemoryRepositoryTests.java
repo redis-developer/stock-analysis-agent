@@ -43,7 +43,8 @@ class AmsChatMemoryRepositoryTests {
                 List.of("aapl"),
                 List.of("market_data"),
                 true,
-                false
+                false,
+                List.of("User prefers concise answers.")
         );
 
         verify(agentMemoryService).appendMessageToWorkingMemory(
@@ -59,6 +60,7 @@ class AmsChatMemoryRepositoryTests {
         assertThat(metadata).doesNotContainKey("fromSemanticGuardrail");
         assertThat(metadata.get("tickers")).isEqualTo(List.of("AAPL"));
         assertThat(metadata.get("triggeredAgents")).isEqualTo(List.of("MARKET_DATA"));
+        assertThat(metadata.get("retrievedMemories")).isEqualTo(List.of("User prefers concise answers."));
         assertThat(metadata.get("tokenUsage")).isEqualTo(Map.of(
                 "promptTokens", 20,
                 "completionTokens", 8,

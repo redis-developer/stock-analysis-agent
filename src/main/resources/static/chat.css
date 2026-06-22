@@ -768,6 +768,71 @@ body::before {
     color: #facc15;
 }
 
+.provider-dead-letter {
+    display: grid;
+    gap: var(--spacing-2);
+    padding-top: var(--spacing-2);
+    border-top: 1px solid var(--color-border);
+}
+
+.provider-dead-letter__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-2);
+    color: var(--color-text);
+    font-size: 0.78rem;
+    font-weight: 750;
+}
+
+.provider-dead-letter__count {
+    min-width: 1.4rem;
+    border: 1px solid rgba(252, 165, 165, 0.5);
+    border-radius: 999px;
+    color: var(--color-danger);
+    font-family: var(--font-family-mono);
+    font-size: 0.62rem;
+    line-height: 1.2;
+    padding: 0.16rem 0.42rem;
+    text-align: center;
+}
+
+.provider-dead-letter__list {
+    display: grid;
+    gap: var(--spacing-1);
+}
+
+.provider-dead-letter__row {
+    display: grid;
+    gap: 0.2rem;
+    padding: 0.55rem 0.65rem;
+    border: 1px solid rgba(252, 165, 165, 0.36);
+    border-radius: var(--radius-md);
+    background: rgba(54, 24, 24, 0.48);
+}
+
+.provider-dead-letter__title {
+    color: var(--color-text);
+    font-size: 0.74rem;
+    font-weight: 750;
+}
+
+.provider-dead-letter__reason,
+.provider-dead-letter__meta,
+.provider-dead-letter__empty {
+    margin: 0;
+    color: var(--color-text-secondary);
+    font-size: 0.68rem;
+    line-height: 1.35;
+}
+
+.provider-dead-letter__meta {
+    font-family: var(--font-family-mono);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .account-menu .btn {
     width: 100%;
 }

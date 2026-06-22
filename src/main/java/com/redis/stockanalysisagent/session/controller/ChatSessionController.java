@@ -182,7 +182,10 @@ public class ChatSessionController {
         HttpSession session = httpRequest.getSession(false);
         String userId = sessionAccess.requireSessionUserId(session);
         List<String> sessions = sessionAccess.normalizeSessionIds(chatSessionService.listSessions(userId));
-        return ResponseEntity.ok(new ChatSessionsResponse(sessions));
+        return ResponseEntity.ok(new ChatSessionsResponse(
+                sessions,
+                chatSessionService.summarizeSessions(userId, sessions)
+        ));
     }
 
     @GetMapping("/session/{sessionId}")

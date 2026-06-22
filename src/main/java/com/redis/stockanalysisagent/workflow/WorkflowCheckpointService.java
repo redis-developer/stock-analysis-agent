@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
@@ -95,16 +96,25 @@ public class WorkflowCheckpointService {
         appendLine(message, "Checkpoint actor", actor(checkpoint));
         appendBlock(message, "Recovered evidence", recoveredEvidence(workflowId, checkpoint));
         message.append("\nCheckpoint summary:\n").append(checkpoint.summary()).append('\n');
-        appendBlock(message, "Checkpoint input", checkpoint.inputPayload());
-        appendBlock(message, "Checkpoint output", checkpoint.outputPayload());
+        appendBlock(message, "Checkpoint input", replaySafePayload(checkpoint.inputPayload()));
+        if (isTemporaryProviderFailure(checkpoint.outputPayload())) {
+            appendBlock(
+                    message,
+                    "Checkpoint output",
+                    "Previous checkpoint output reported a temporary provider failure. Treat that specialist evidence as missing and retry the tool if it is still needed."
+            );
+        } else {
+            appendBlock(message, "Checkpoint output", checkpoint.outputPayload());
+        }
         message.append("""
 
                 Recovery instructions:
-                1. Treat recovered evidence as committed specialist output from work that already completed before the checkpoint.
-                2. Do not call specialist tools for evidence that is already present.
-                3. Call only missing specialist tools needed to finish the answer.
-                4. If the recovered evidence is enough, answer directly from it.
-                5. Use the checkpoint as committed context and continue from that point.
+                1. Treat successful recovered evidence as committed specialist output from work that already completed before the checkpoint.
+                2. Do not call specialist tools for successful evidence that is already present.
+                3. Provider outage, unavailable, rate limit, timeout, or failed retrieval messages are not successful evidence.
+                4. Retry missing specialist tools when their previous output only reported a temporary provider failure.
+                5. If successful recovered evidence is enough, answer directly from it.
+                6. Use the checkpoint as committed context and continue from that point.
                 """);
         return message.toString();
     }
@@ -139,7 +149,12 @@ public class WorkflowCheckpointService {
     }
 
     private boolean isEvidenceEvent(Map<Object, Object> values) {
-        if (!"completed".equals(value(values, "status")) || value(values, "outputPayload").isBlank()) {
+        String outputPayload = value(values, "outputPayload");
+        if (!"completed".equals(value(values, "status")) || outputPayload.isBlank()) {
+            return false;
+        }
+
+        if (isTemporaryProviderFailure(outputPayload)) {
             return false;
         }
 
@@ -172,6 +187,57 @@ public class WorkflowCheckpointService {
 
         String actorName = actor(values);
         return actorName.isBlank() ? "Specialist evidence" : "Specialist evidence: " + actorName;
+    }
+
+    private String replaySafePayload(String payload) {
+        if (payload == null || payload.isBlank()) {
+            return "";
+        }
+        if (!payload.startsWith("Continue this stock analysis workflow from the latest Redis checkpoint.")) {
+            return payload;
+        }
+
+        return extractOriginalCheckpointInput(payload);
+    }
+
+    private String extractOriginalCheckpointInput(String payload) {
+        String current = payload;
+        String candidate = "";
+        while (current != null && !current.isBlank()) {
+            int start = current.indexOf("\nCheckpoint input:\n");
+            if (start < 0) {
+                break;
+            }
+            start += "\nCheckpoint input:\n".length();
+            int end = current.indexOf("\nCheckpoint output:", start);
+            if (end < 0) {
+                end = current.indexOf("\nRecovery instructions:", start);
+            }
+            String block = (end < 0 ? current.substring(start) : current.substring(start, end)).trim();
+            if (!block.startsWith("Continue this stock analysis workflow from the latest Redis checkpoint.")) {
+                candidate = block;
+            }
+            current = block;
+        }
+        return candidate;
+    }
+
+    private boolean isTemporaryProviderFailure(String text) {
+        if (text == null || text.isBlank()) {
+            return false;
+        }
+
+        String normalized = text.toLowerCase(Locale.ROOT);
+        return normalized.contains("provider outage")
+                || normalized.contains("data provider outage")
+                || normalized.contains("unable to retrieve")
+                || normalized.contains("currently unable")
+                || normalized.contains("temporarily unavailable")
+                || normalized.contains("temporary service outage")
+                || normalized.contains("service outage")
+                || normalized.contains("rate limit")
+                || normalized.contains("timed out")
+                || normalized.contains("timeout");
     }
 
     private String actor(WorkflowCheckpoint checkpoint) {

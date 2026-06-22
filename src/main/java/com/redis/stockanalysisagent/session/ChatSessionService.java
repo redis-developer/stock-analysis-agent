@@ -157,7 +157,7 @@ public class ChatSessionService {
         String createdAt = storedMessages.stream()
                 .map(StoredMemoryMessage::timestamp)
                 .filter(timestamp -> timestamp != null && !timestamp.isBlank())
-                .findFirst()
+                .min(String::compareTo)
                 .orElseGet(() -> sessionCreatedAt(userId, sessionId));
 
         return new ChatSessionSummary(sessionId, createdAt, sessionMetadata(storedMessages, latestWorkflowState(sessionId)));
@@ -194,6 +194,7 @@ public class ChatSessionService {
                         message.timestamp(),
                         tokenUsage(message.metadata() == null ? null : message.metadata().get("tokenUsage")),
                         executionSteps(message.metadata()),
+                        stringList(message.metadata(), "retrievedMemories"),
                         booleanFlag(message.metadata(), "fromSemanticCache"),
                         booleanFlag(message.metadata(), "fromSemanticGuardrail")
                 )
@@ -544,6 +545,20 @@ public class ChatSessionService {
             return booleanValue;
         }
         return value != null && Boolean.parseBoolean(value.toString());
+    }
+
+    private List<String> stringList(Map<String, Object> metadata, String key) {
+        Object value = metadata == null ? null : metadata.get(key);
+        if (!(value instanceof List<?> rawValues)) {
+            return List.of();
+        }
+
+        return rawValues.stream()
+                .filter(String.class::isInstance)
+                .map(String.class::cast)
+                .map(String::trim)
+                .filter(text -> !text.isBlank())
+                .toList();
     }
 
     private List<ExternalDataAccess> dataAccesses(Object value) {

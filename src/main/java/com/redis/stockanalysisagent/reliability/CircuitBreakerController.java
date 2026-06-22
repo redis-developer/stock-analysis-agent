@@ -27,19 +27,22 @@ public class CircuitBreakerController {
     private final ProviderFailureSimulationService failureSimulationService;
     private final ProviderLatencySimulationService latencySimulationService;
     private final ProviderLatencySimulationProperties latencySimulationProperties;
+    private final ProviderDeadLetterService deadLetterService;
 
     public CircuitBreakerController(
             CircuitBreakerService circuitBreakerService,
             ProviderCapacityService providerCapacityService,
             ProviderFailureSimulationService failureSimulationService,
             ProviderLatencySimulationService latencySimulationService,
-            ProviderLatencySimulationProperties latencySimulationProperties
+            ProviderLatencySimulationProperties latencySimulationProperties,
+            ProviderDeadLetterService deadLetterService
     ) {
         this.circuitBreakerService = circuitBreakerService;
         this.providerCapacityService = providerCapacityService;
         this.failureSimulationService = failureSimulationService;
         this.latencySimulationService = latencySimulationService;
         this.latencySimulationProperties = latencySimulationProperties;
+        this.deadLetterService = deadLetterService;
     }
 
     @GetMapping
@@ -54,6 +57,11 @@ public class CircuitBreakerController {
     @GetMapping("/{providerId}")
     public CircuitBreakerState state(@PathVariable String providerId) {
         return circuitBreakerService.state(providerId);
+    }
+
+    @GetMapping("/dead-letter")
+    public List<ProviderFailureRecord> deadLetter() {
+        return deadLetterService.recent();
     }
 
     @PostMapping("/{providerId}/open")

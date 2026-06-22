@@ -110,13 +110,14 @@ docker run --rm -p 8080:8080 --env-file .env stock-analysis-agent
 
 ## Grafana
 
-Start the optional Grafana dashboard for workflow streams:
+Start the optional Grafana dashboards:
 
 ```bash
 docker compose -f docker-compose.grafana.yml up
 ```
 
-Open `http://localhost:3000/d/stock-analysis-workflows/workflow-event-log`.
+Open `http://localhost:3000/d/stock-analysis-workflows/workflow-event-log` for workflow streams.
+Open `http://localhost:3000/d/stock-analysis-provider-dlq/provider-dead-letter-queue` for provider dead letter records.
 
 The Grafana container is also deployable to Cloud Run. The image bakes in the Redis datasource plugin, provisioning files, and dashboard JSON. Set `STOCK_ANALYSIS_AGENT_APP_BASE_URL` to the deployed app URL so the workflow timeline and metadata panels can call the app.
 

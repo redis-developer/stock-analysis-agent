@@ -11,15 +11,16 @@ public record ChatSessionMessage(
         String timestamp,
         TokenUsageSummary tokenUsage,
         List<ChatExecutionStep> executionSteps,
+        List<String> retrievedMemories,
         boolean fromSemanticCache,
         boolean fromSemanticGuardrail
 ) {
     public ChatSessionMessage(String role, String content) {
-        this(role, content, null, null, List.of(), false, false);
+        this(role, content, null, null, List.of(), List.of(), false, false);
     }
 
     public ChatSessionMessage(String role, String content, String timestamp) {
-        this(role, content, timestamp, null, List.of(), false, false);
+        this(role, content, timestamp, null, List.of(), List.of(), false, false);
     }
 
     public ChatSessionMessage(
@@ -29,7 +30,7 @@ public record ChatSessionMessage(
             TokenUsageSummary tokenUsage,
             List<ChatExecutionStep> executionSteps
     ) {
-        this(role, content, timestamp, tokenUsage, executionSteps, false, false);
+        this(role, content, timestamp, tokenUsage, executionSteps, List.of(), false, false);
     }
 
     public ChatSessionMessage(
@@ -38,10 +39,11 @@ public record ChatSessionMessage(
             String timestamp,
             List<ChatExecutionStep> executionSteps
     ) {
-        this(role, content, timestamp, null, executionSteps, false, false);
+        this(role, content, timestamp, null, executionSteps, List.of(), false, false);
     }
 
     public ChatSessionMessage {
         executionSteps = executionSteps == null ? List.of() : List.copyOf(executionSteps);
+        retrievedMemories = retrievedMemories == null ? List.of() : List.copyOf(retrievedMemories);
     }
 }

@@ -200,6 +200,33 @@ class CoordinatorAgentToolsTests {
         }
     }
 
+    @Test
+    void recoveredProviderOutageIsNotStoredAsReusableEvidence() {
+        tools.startTrace("""
+                Continue this stock analysis workflow from the latest Redis checkpoint.
+
+                Recovered evidence:
+                Specialist evidence: news
+                Step: NEWS:MSFT
+                Actor: news
+                Input: agent: NEWS
+                ticker: MSFT
+                Output: I'm currently unable to retrieve the latest news for Microsoft due to a data provider outage.
+
+                Checkpoint summary:
+                Completed after 1 specialist agent call.
+                """);
+        try {
+            CoordinatorAgentTools.AgentToolResult result = tools.runSynthesisAgent("MSFT", "What recent news should I know about Microsoft?");
+
+            assertThat(result.status()).isEqualTo("ERROR");
+            assertThat(result.message()).isEqualTo("Synthesis skipped because no specialist evidence is available.");
+            verifyNoInteractions(synthesisAgent);
+        } finally {
+            tools.clearTrace();
+        }
+    }
+
     private boolean containsAppleEvidence(SynthesisEvidence evidence) {
         return evidence != null
                 && evidence.marketData().containsKey("AAPL")

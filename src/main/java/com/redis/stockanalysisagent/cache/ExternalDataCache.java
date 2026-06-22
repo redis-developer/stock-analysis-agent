@@ -5,7 +5,10 @@ import com.redis.stockanalysisagent.reliability.CircuitBreakerOpenException;
 import com.redis.stockanalysisagent.reliability.CircuitBreakerService;
 import com.redis.stockanalysisagent.reliability.ProviderCapacityService;
 import com.redis.stockanalysisagent.reliability.ProviderCapacityTimeoutException;
+import com.redis.stockanalysisagent.reliability.ProviderDeadLetterService;
 import com.redis.stockanalysisagent.reliability.ProviderLatencySimulationService;
+import com.redis.stockanalysisagent.reliability.ProviderRetriesExhaustedException;
+import com.redis.stockanalysisagent.reliability.ProviderRetryProperties;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
@@ -26,6 +29,8 @@ public class ExternalDataCache {
     private final CircuitBreakerService circuitBreakerService;
     private final ProviderCapacityService providerCapacityService;
     private final ProviderLatencySimulationService latencySimulationService;
+    private final ProviderRetryProperties retryProperties;
+    private final ProviderDeadLetterService deadLetterService;
     private final ConcurrentMap<String, Object> locks = new ConcurrentHashMap<>();
     private final ThreadLocal<List<ExternalDataAccess>> recordedAccesses = ThreadLocal.withInitial(ArrayList::new);
     private final ThreadLocal<Boolean> cachingEnabled = ThreadLocal.withInitial(() -> true);
@@ -37,7 +42,9 @@ public class ExternalDataCache {
             ExternalApiUsageService apiUsageService,
             CircuitBreakerService circuitBreakerService,
             ProviderCapacityService providerCapacityService,
-            ProviderLatencySimulationService latencySimulationService
+            ProviderLatencySimulationService latencySimulationService,
+            ProviderRetryProperties retryProperties,
+            ProviderDeadLetterService deadLetterService
     ) {
         this.cacheManager = cacheManager;
         this.progressPublisher = progressPublisher;
@@ -45,6 +52,8 @@ public class ExternalDataCache {
         this.circuitBreakerService = circuitBreakerService;
         this.providerCapacityService = providerCapacityService;
         this.latencySimulationService = latencySimulationService;
+        this.retryProperties = retryProperties;
+        this.deadLetterService = deadLetterService;
     }
 
     ExternalDataCache(
@@ -58,6 +67,8 @@ public class ExternalDataCache {
         this.circuitBreakerService = null;
         this.providerCapacityService = null;
         this.latencySimulationService = null;
+        this.retryProperties = null;
+        this.deadLetterService = null;
     }
 
     @SuppressWarnings("unchecked")
@@ -163,6 +174,7 @@ public class ExternalDataCache {
             });
             return loaded;
         } catch (CircuitBreakerOpenException ex) {
+            appendDeadLetter(id, cacheName, key, 0, ex);
             progressPublisher.failed(
                     id,
                     "Circuit breaker",
@@ -172,8 +184,20 @@ public class ExternalDataCache {
             );
             throw ex;
         } catch (ProviderCapacityTimeoutException ex) {
+            appendDeadLetter(id, cacheName, key, 0, ex);
+            throw ex;
+        } catch (ProviderRetriesExhaustedException ex) {
+            appendDeadLetter(id, cacheName, key, ex.attempts(), ex);
+            progressPublisher.failed(
+                    id,
+                    label,
+                    ChatProgressPublisher.KIND_SYSTEM,
+                    elapsedDurationMs(startedAt),
+                    errorMessage(ex)
+            );
             throw ex;
         } catch (RuntimeException ex) {
+            appendDeadLetter(id, cacheName, key, 1, ex);
             progressPublisher.failed(
                     id,
                     label,
@@ -192,7 +216,7 @@ public class ExternalDataCache {
         }
 
         if (providerCapacityService == null || !providerCapacityService.enabled()) {
-            return loadWithCircuitBreaker(providerId, loader);
+            return loadWithCircuitBreaker(providerId, () -> loadWithRetries(providerId, cacheName, key, loader));
         }
 
         String label = "Waiting for " + providerLabel(providerId) + " capacity";
@@ -213,7 +237,7 @@ public class ExternalDataCache {
                     waitedMs,
                     capacityAcquiredSummary(providerId, permit, waitedMs)
             );
-            return loadWithCircuitBreaker(providerId, loader);
+            return loadWithCircuitBreaker(providerId, () -> loadWithRetries(providerId, cacheName, key, loader));
         } catch (ProviderCapacityTimeoutException ex) {
             progressPublisher.failed(
                     stepId,
@@ -250,6 +274,56 @@ public class ExternalDataCache {
         return circuitBreakerService.call(providerId, loader);
     }
 
+    private <T> T loadWithRetries(String providerId, String cacheName, String key, Supplier<T> loader) {
+        int maxAttempts = retryProperties == null || !retryProperties.isEnabled()
+                ? 1
+                : retryProperties.getMaxAttempts();
+        RuntimeException lastFailure = null;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                return loader.get();
+            } catch (CircuitBreakerOpenException | ProviderCapacityTimeoutException ex) {
+                throw ex;
+            } catch (RuntimeException ex) {
+                lastFailure = ex;
+                if (attempt >= maxAttempts) {
+                    throw new ProviderRetriesExhaustedException(providerId, attempt, ex);
+                }
+                progressPublisher.running(
+                        retryStepId(providerId),
+                        "Retrying " + providerLabel(providerId),
+                        ChatProgressPublisher.KIND_SYSTEM,
+                        "Attempt " + attempt + " failed. Retrying " + providerLabel(providerId) + "."
+                );
+                sleepBeforeRetry();
+            }
+        }
+        throw new ProviderRetriesExhaustedException(providerId, maxAttempts, lastFailure);
+    }
+
+    private void sleepBeforeRetry() {
+        if (retryProperties == null || retryProperties.getBackoff().isZero() || retryProperties.getBackoff().isNegative()) {
+            return;
+        }
+        try {
+            Thread.sleep(retryProperties.getBackoff().toMillis());
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while waiting to retry provider call.", ex);
+        }
+    }
+
+    private void appendDeadLetter(String stepId, String cacheName, String key, int attempts, RuntimeException ex) {
+        if (deadLetterService == null) {
+            return;
+        }
+        String providerId = providerId(cacheName);
+        if (providerId == null) {
+            return;
+        }
+        deadLetterService.append(stepId, providerId, providerLabel(providerId), cacheName, key, attempts, ex);
+    }
+
     private void sleepIfLatencySimulationEnabled(String cacheName) {
         if (latencySimulationService == null) {
             return;
@@ -277,6 +351,10 @@ public class ExternalDataCache {
 
     private String capacityStepId(String providerId, String cacheName, String key) {
         return "CAPACITY:%s".formatted(safeIdPart(providerId));
+    }
+
+    private String retryStepId(String providerId) {
+        return "RETRY:%s".formatted(safeIdPart(providerId));
     }
 
     private String safeIdPart(String value) {

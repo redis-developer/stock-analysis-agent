@@ -56,6 +56,7 @@
             twelveDataApiHits: 0
         },
         circuitBreakers: defaultCircuitBreakers(),
+        providerDeadLetter: [],
         sessionManagementEnabled: true
     };
 
@@ -116,6 +117,8 @@
         tavilyApiResetButton: document.getElementById("tavily-api-reset-button"),
         twelveDataApiResetButton: document.getElementById("twelve-data-api-reset-button"),
         circuitBreakerList: document.getElementById("circuit-breaker-list"),
+        providerDeadLetterList: document.getElementById("provider-dead-letter-list"),
+        providerDeadLetterCount: document.getElementById("provider-dead-letter-count"),
         refreshCircuitBreakersButton: document.getElementById("refresh-circuit-breakers-button"),
         sessionIdValue: document.getElementById("session-id-value"),
         emptyStateTemplate: document.getElementById("empty-state-template")
@@ -1142,6 +1145,22 @@
         return Array.isArray(body) ? body : [];
     }
 
+    async function fetchProviderDeadLetter() {
+        const response = await fetch(new URL("./api/circuit-breakers/dead-letter", window.location.href));
+        const contentType = response.headers.get("content-type") || "";
+        const rawBody = await response.text();
+        const body = contentType.includes("application/json") ? safeParseJson(rawBody) : null;
+
+        if (!response.ok) {
+            if (handleUnauthorizedResponse(response)) {
+                throw new Error("Login is required.");
+            }
+            throw new Error(extractErrorMessage(body, rawBody, response.status));
+        }
+
+        return Array.isArray(body) ? body : [];
+    }
+
     async function updateFailureSimulation(providerId, enabled) {
         const response = await fetch(new URL(
             "./api/circuit-breakers/" + encodeURIComponent(providerId) + "/simulation",
@@ -1246,7 +1265,7 @@
             const sessionItems = body && Array.isArray(body.sessionDetails) && body.sessionDetails.length > 0
                 ? body.sessionDetails
                 : body && body.sessions;
-            state.sessions = normalizeSessionList(sessionItems);
+            state.sessions = normalizeRemoteSessionList(sessionItems);
             if (reportStatus) {
                 setStatus("Sessions refreshed");
             }
@@ -1254,7 +1273,7 @@
             if (requestedUserId !== activeUserId()) {
                 return;
             }
-            state.sessions = normalizeSessionList(state.sessions);
+            state.sessions = normalizeRemoteSessionList(state.sessions);
             if (reportStatus) {
                 setStatus("Session refresh failed", "error");
             }
@@ -1597,7 +1616,10 @@
             state.userId = body.userId || activeUserId();
             state.sessionId = body.sessionId || sessionId;
             applySessionWorkflowMetadata(state.sessionId, body.metadata);
-            setActiveSessionMessages(normalizeSessionMessages(body.messages));
+            setActiveSessionMessages(mergeSessionMessages(
+                sessionMessages(state.sessionId),
+                normalizeSessionMessages(body.messages)
+            ));
             persistSessionId(state.sessionId);
             syncLoadingState();
             renderIdentity();
@@ -1638,7 +1660,10 @@
             }
 
             const currentMessages = sessionMessages(requestedSessionId);
-            const nextMessages = normalizeSessionMessages(body.messages);
+            const nextMessages = mergeSessionMessages(
+                currentMessages,
+                normalizeSessionMessages(body.messages)
+            );
             const workflowChanged = applySessionWorkflowMetadata(requestedSessionId, body.metadata);
             if (nextMessages.length === 0 && currentMessages.length > 0) {
                 return;
@@ -1659,9 +1684,7 @@
             renderSessions();
             renderMessages();
             refreshSessions(true, false);
-            if (messagesChanged) {
-                setStatus("Session updated");
-            } else if (isSessionPending(state.sessionId)) {
+            if (isSessionPending(state.sessionId)) {
                 setStatus("Recovering workflow");
             }
         } catch (error) {
@@ -1703,10 +1726,23 @@
             return {
                 role: message && message.role,
                 content: message && message.content,
+                memories: stringListSignature(message && message.memories),
+                fromSemanticCache: Boolean(message && message.fromSemanticCache),
+                fromSemanticGuardrail: Boolean(message && message.fromSemanticGuardrail),
                 steps: stepListSignature(message && message.executionSteps),
                 tokenUsage: tokenUsageSignature(message && message.tokenUsage)
             };
         }));
+    }
+
+    function stringListSignature(values) {
+        if (!Array.isArray(values)) {
+            return [];
+        }
+
+        return values.map(function (value) {
+            return typeof value === "string" ? value.trim() : "";
+        }).filter(Boolean);
     }
 
     function stepListSignature(steps) {
@@ -2065,6 +2101,62 @@
         return Array.isArray(messages) ? messages : [];
     }
 
+    function mergeSessionMessages(currentMessages, nextMessages) {
+        const current = Array.isArray(currentMessages) ? currentMessages : [];
+        const next = Array.isArray(nextMessages) ? nextMessages : [];
+        const usedCurrentIndexes = new Set();
+
+        return next.map(function (nextMessage, index) {
+            const localMessage = matchingLocalMessage(current, nextMessage, index, usedCurrentIndexes);
+            return mergeMessageState(localMessage, nextMessage);
+        });
+    }
+
+    function matchingLocalMessage(messages, nextMessage, index, usedIndexes) {
+        const indexedMessage = messages[index];
+        if (isSameChatMessage(indexedMessage, nextMessage)) {
+            usedIndexes.add(index);
+            return indexedMessage;
+        }
+
+        const foundIndex = messages.findIndex(function (message, candidateIndex) {
+            return !usedIndexes.has(candidateIndex) && isSameChatMessage(message, nextMessage);
+        });
+        if (foundIndex < 0) {
+            return null;
+        }
+
+        usedIndexes.add(foundIndex);
+        return messages[foundIndex];
+    }
+
+    function isSameChatMessage(left, right) {
+        return Boolean(left && right && left.role === right.role && left.content === right.content);
+    }
+
+    function mergeMessageState(localMessage, nextMessage) {
+        if (!localMessage) {
+            return nextMessage;
+        }
+
+        const localMemories = Array.isArray(localMessage.memories) ? localMessage.memories : [];
+        const nextMemories = Array.isArray(nextMessage.memories) ? nextMessage.memories : [];
+        const localExecutionSteps = Array.isArray(localMessage.executionSteps) ? localMessage.executionSteps : [];
+        const nextExecutionSteps = Array.isArray(nextMessage.executionSteps) ? nextMessage.executionSteps : [];
+        const localActivitySteps = Array.isArray(localMessage.activitySteps) ? localMessage.activitySteps : [];
+        const nextActivitySteps = Array.isArray(nextMessage.activitySteps) ? nextMessage.activitySteps : [];
+
+        return Object.assign({}, nextMessage, {
+            memories: nextMemories.length > 0 ? nextMemories : localMemories,
+            fromSemanticCache: Boolean(nextMessage.fromSemanticCache || localMessage.fromSemanticCache),
+            fromSemanticGuardrail: Boolean(nextMessage.fromSemanticGuardrail || localMessage.fromSemanticGuardrail),
+            tokenUsage: nextMessage.tokenUsage || localMessage.tokenUsage || null,
+            responseTimeMs: nextMessage.responseTimeMs != null ? nextMessage.responseTimeMs : localMessage.responseTimeMs,
+            executionSteps: nextExecutionSteps.length > 0 ? nextExecutionSteps : localExecutionSteps,
+            activitySteps: nextActivitySteps.length > 0 ? nextActivitySteps : localActivitySteps
+        });
+    }
+
     function renderMessages() {
         const stickToBottom = shouldStickToBottom();
         elements.messages.replaceChildren();
@@ -2140,6 +2232,7 @@
         for (const status of statuses) {
             elements.circuitBreakerList.appendChild(buildCircuitBreakerRow(status));
         }
+        renderProviderDeadLetter();
     }
 
     function buildCircuitBreakerRow(status) {
@@ -2216,6 +2309,50 @@
         }
         latencyToggle.title = (latencyEnabled ? "Disable" : "Enable") + " simulated latency for " + (status.label || providerId);
         row.appendChild(latencyToggle);
+
+        return row;
+    }
+
+    function renderProviderDeadLetter() {
+        const failures = normalizeProviderDeadLetter(state.providerDeadLetter);
+        elements.providerDeadLetterCount.textContent = String(failures.length);
+        elements.providerDeadLetterList.replaceChildren();
+
+        if (failures.length === 0) {
+            const empty = document.createElement("p");
+            empty.className = "provider-dead-letter__empty";
+            empty.textContent = "No failed provider steps.";
+            elements.providerDeadLetterList.appendChild(empty);
+            return;
+        }
+
+        for (const failure of failures.slice(0, 5)) {
+            elements.providerDeadLetterList.appendChild(buildProviderFailureRow(failure));
+        }
+    }
+
+    function buildProviderFailureRow(failure) {
+        const row = document.createElement("div");
+        row.className = "provider-dead-letter__row";
+
+        const title = document.createElement("div");
+        title.className = "provider-dead-letter__title";
+        title.textContent = (failure.providerLabel || formatProviderLabel(failure.providerId))
+            + " failed after "
+            + failure.attempts
+            + " attempt"
+            + (failure.attempts === 1 ? "" : "s");
+        row.appendChild(title);
+
+        const reason = document.createElement("div");
+        reason.className = "provider-dead-letter__reason";
+        reason.textContent = failure.reason || "Provider call failed.";
+        row.appendChild(reason);
+
+        const meta = document.createElement("div");
+        meta.className = "provider-dead-letter__meta";
+        meta.textContent = [failure.stepId, formatTimestamp(failure.failedAt)].filter(Boolean).join(" | ");
+        row.appendChild(meta);
 
         return row;
     }
@@ -2782,6 +2919,34 @@
         };
     }
 
+    function normalizeProviderDeadLetter(records) {
+        return (Array.isArray(records) ? records : [])
+            .map(normalizeProviderFailure)
+            .filter(Boolean);
+    }
+
+    function normalizeProviderFailure(record) {
+        if (!record || typeof record !== "object") {
+            return null;
+        }
+        return {
+            failureId: textValue(record.failureId),
+            workflowId: textValue(record.workflowId),
+            stepId: textValue(record.stepId),
+            providerId: normalizeProviderId(record.providerId),
+            providerLabel: textValue(record.providerLabel),
+            cacheName: textValue(record.cacheName),
+            cacheKey: textValue(record.cacheKey),
+            attempts: normalizeCount(record.attempts),
+            reason: textValue(record.reason),
+            failedAt: textValue(record.failedAt)
+        };
+    }
+
+    function textValue(value) {
+        return value === null || value === undefined ? "" : String(value);
+    }
+
     function formatCapacityActive(capacity) {
         return normalizeCount(capacity && capacity.activeCount) + "/" + normalizePositiveCount(capacity && capacity.limit, 2);
     }
@@ -2930,7 +3095,12 @@
         state.circuitBreakersLoading = true;
         renderCircuitBreakers();
         try {
-            state.circuitBreakers = normalizeCircuitBreakerStatuses(await fetchCircuitBreakers());
+            const results = await Promise.all([
+                fetchCircuitBreakers(),
+                fetchProviderDeadLetter()
+            ]);
+            state.circuitBreakers = normalizeCircuitBreakerStatuses(results[0]);
+            state.providerDeadLetter = normalizeProviderDeadLetter(results[1]);
             renderCircuitBreakers();
             if (reportStatus) {
                 setStatus("Provider health refreshed");
@@ -4193,7 +4363,10 @@
         const normalized = [];
         const seen = new Set();
 
-        addSessionId(state.sessionId);
+        const activeSessionId = normalizeSessionValue(state.sessionId);
+        if (activeSessionId && hasLocalSessionState(activeSessionId)) {
+            addSessionId(activeSessionId);
+        }
         for (const sessionId of Object.keys(state.pendingSessions)) {
             addSessionId(sessionId);
         }
@@ -4204,20 +4377,11 @@
         }
         if (Array.isArray(sessions)) {
             for (const session of sessions) {
-                addSession(session);
+                addSessionId(sessionIdFromSessionListItem(session));
             }
         }
 
         return normalized;
-
-        function addSession(session) {
-            const sessionId = sessionIdFromSessionListItem(session);
-            const createdAt = sessionCreatedAtFromSessionListItem(session);
-            if (createdAt) {
-                storeSessionLabel(sessionId, createdAt);
-            }
-            addSessionId(sessionId);
-        }
 
         function addSessionId(sessionId) {
             const value = typeof sessionId === "string" ? sessionId.trim() : "";
@@ -4228,6 +4392,32 @@
             seen.add(value);
             normalized.push(value);
         }
+    }
+
+    function normalizeRemoteSessionList(sessions) {
+        const normalized = [];
+        const seen = new Set();
+        if (!Array.isArray(sessions)) {
+            return normalized;
+        }
+
+        for (const session of sessions) {
+            const sessionId = sessionIdFromSessionListItem(session);
+            const createdAt = sessionCreatedAtFromSessionListItem(session);
+            if (createdAt) {
+                storeSessionLabel(sessionId, createdAt);
+            }
+            if (!sessionId || seen.has(sessionId)) {
+                continue;
+            }
+            seen.add(sessionId);
+            normalized.push(sessionId);
+        }
+        return normalized;
+    }
+
+    function hasLocalSessionState(sessionId) {
+        return isSessionPending(sessionId) || sessionMessages(sessionId).length > 0;
     }
 
     function sessionIdFromSessionListItem(session) {
@@ -4286,6 +4476,9 @@
                 role: role,
                 content: content,
                 timestamp: timestamp,
+                memories: normalizeStringList(
+                    message && (message.retrievedMemories || message.memories)
+                ),
                 fromSemanticCache: Boolean(message && message.fromSemanticCache),
                 fromSemanticGuardrail: Boolean(message && message.fromSemanticGuardrail),
                 tokenUsage: tokenUsage,
@@ -4293,6 +4486,16 @@
                 executionSteps: executionSteps,
                 activitySteps: role === "assistant" ? executionStepsToActivitySteps(executionSteps) : []
             };
+        }).filter(Boolean);
+    }
+
+    function normalizeStringList(values) {
+        if (!Array.isArray(values)) {
+            return [];
+        }
+
+        return values.map(function (value) {
+            return typeof value === "string" ? value.trim() : "";
         }).filter(Boolean);
     }
 

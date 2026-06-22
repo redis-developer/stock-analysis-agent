@@ -61,6 +61,12 @@ stock-analysis:
     wait-timeout: ${STOCK_ANALYSIS_PROVIDER_CAPACITY_WAIT_TIMEOUT:40s}
     retry-interval: ${STOCK_ANALYSIS_PROVIDER_CAPACITY_RETRY_INTERVAL:100ms}
     state-ttl: ${STOCK_ANALYSIS_PROVIDER_CAPACITY_STATE_TTL:7d}
+  provider-retries:
+    enabled: ${STOCK_ANALYSIS_PROVIDER_RETRIES_ENABLED:true}
+    max-attempts: ${STOCK_ANALYSIS_PROVIDER_RETRIES_MAX_ATTEMPTS:2}
+    backoff: ${STOCK_ANALYSIS_PROVIDER_RETRIES_BACKOFF:250ms}
+    dead-letter-ttl: ${STOCK_ANALYSIS_PROVIDER_DEAD_LETTER_TTL:7d}
+    dead-letter-read-limit: ${STOCK_ANALYSIS_PROVIDER_DEAD_LETTER_READ_LIMIT:25}
   provider-latency-simulation:
     default-delay: ${STOCK_ANALYSIS_PROVIDER_SIMULATED_DELAY:40s}
   market-data:
