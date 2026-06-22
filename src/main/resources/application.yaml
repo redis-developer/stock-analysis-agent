@@ -57,12 +57,12 @@ stock-analysis:
   provider-capacity:
     enabled: ${STOCK_ANALYSIS_PROVIDER_CAPACITY_ENABLED:true}
     default-limit: ${STOCK_ANALYSIS_PROVIDER_CAPACITY_DEFAULT_LIMIT:2}
-    permit-ttl: ${STOCK_ANALYSIS_PROVIDER_CAPACITY_PERMIT_TTL:30s}
-    wait-timeout: ${STOCK_ANALYSIS_PROVIDER_CAPACITY_WAIT_TIMEOUT:5s}
+    permit-ttl: ${STOCK_ANALYSIS_PROVIDER_CAPACITY_PERMIT_TTL:40s}
+    wait-timeout: ${STOCK_ANALYSIS_PROVIDER_CAPACITY_WAIT_TIMEOUT:40s}
     retry-interval: ${STOCK_ANALYSIS_PROVIDER_CAPACITY_RETRY_INTERVAL:100ms}
     state-ttl: ${STOCK_ANALYSIS_PROVIDER_CAPACITY_STATE_TTL:7d}
   provider-latency-simulation:
-    default-delay: ${STOCK_ANALYSIS_PROVIDER_SIMULATED_DELAY:20s}
+    default-delay: ${STOCK_ANALYSIS_PROVIDER_SIMULATED_DELAY:40s}
   market-data:
     provider: twelve-data
     twelve-data:
