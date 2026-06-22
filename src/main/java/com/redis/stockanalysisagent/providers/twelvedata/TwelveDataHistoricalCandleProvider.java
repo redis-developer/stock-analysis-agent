@@ -1,7 +1,9 @@
 package com.redis.stockanalysisagent.providers.twelvedata;
 
 import com.redis.stockanalysisagent.providers.HistoricalCandleProvider;
+import com.redis.stockanalysisagent.reliability.CircuitBreakerService;
 import com.redis.stockanalysisagent.stock.HistoricalCandle;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -28,15 +30,26 @@ public class TwelveDataHistoricalCandleProvider implements HistoricalCandleProvi
 
     private final RestClient restClient;
     private final TwelveDataProperties properties;
+    private final CircuitBreakerService circuitBreakerService;
 
+    @Autowired
     public TwelveDataHistoricalCandleProvider(
             RestClient.Builder restClientBuilder,
-            TwelveDataProperties properties
+            TwelveDataProperties properties,
+            CircuitBreakerService circuitBreakerService
     ) {
         this.properties = properties;
+        this.circuitBreakerService = circuitBreakerService;
         this.restClient = restClientBuilder
                 .baseUrl(properties.getBaseUrl().toString())
                 .build();
+    }
+
+    TwelveDataHistoricalCandleProvider(
+            RestClient.Builder restClientBuilder,
+            TwelveDataProperties properties
+    ) {
+        this(restClientBuilder, properties, null);
     }
 
     @Override
@@ -54,6 +67,21 @@ public class TwelveDataHistoricalCandleProvider implements HistoricalCandleProvi
                     """.stripIndent().trim());
         }
 
+        if (circuitBreakerService == null) {
+            return fetchCandlesFromProvider(ticker, interval, adjustment, startDate, endDate);
+        }
+
+        return circuitBreakerService.call("twelve-data", () ->
+                fetchCandlesFromProvider(ticker, interval, adjustment, startDate, endDate));
+    }
+
+    private List<HistoricalCandle> fetchCandlesFromProvider(
+            String ticker,
+            String interval,
+            String adjustment,
+            LocalDate startDate,
+            LocalDate endDate
+    ) {
         String symbol = ticker.toUpperCase(Locale.ROOT);
         JsonNode response = restClient.get()
                 .uri(uriBuilder -> uriBuilder

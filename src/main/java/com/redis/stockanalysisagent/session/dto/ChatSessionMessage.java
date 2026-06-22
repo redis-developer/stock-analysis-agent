@@ -10,14 +10,26 @@ public record ChatSessionMessage(
         String content,
         String timestamp,
         TokenUsageSummary tokenUsage,
-        List<ChatExecutionStep> executionSteps
+        List<ChatExecutionStep> executionSteps,
+        boolean fromSemanticCache,
+        boolean fromSemanticGuardrail
 ) {
     public ChatSessionMessage(String role, String content) {
-        this(role, content, null, null, List.of());
+        this(role, content, null, null, List.of(), false, false);
     }
 
     public ChatSessionMessage(String role, String content, String timestamp) {
-        this(role, content, timestamp, null, List.of());
+        this(role, content, timestamp, null, List.of(), false, false);
+    }
+
+    public ChatSessionMessage(
+            String role,
+            String content,
+            String timestamp,
+            TokenUsageSummary tokenUsage,
+            List<ChatExecutionStep> executionSteps
+    ) {
+        this(role, content, timestamp, tokenUsage, executionSteps, false, false);
     }
 
     public ChatSessionMessage(
@@ -26,7 +38,7 @@ public record ChatSessionMessage(
             String timestamp,
             List<ChatExecutionStep> executionSteps
     ) {
-        this(role, content, timestamp, null, executionSteps);
+        this(role, content, timestamp, null, executionSteps, false, false);
     }
 
     public ChatSessionMessage {

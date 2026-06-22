@@ -278,10 +278,21 @@ public class ChatService {
             String response,
             List<ChatExecutionStep> executionSteps,
             List<String> tickers,
-            List<String> triggeredAgents
+            List<String> triggeredAgents,
+            boolean fromSemanticCache,
+            boolean fromSemanticGuardrail
     ) {
         try {
-            memoryRepository.saveTurn(conversationId, message, response, executionSteps, tickers, triggeredAgents);
+            memoryRepository.saveTurn(
+                    conversationId,
+                    message,
+                    response,
+                    executionSteps,
+                    tickers,
+                    triggeredAgents,
+                    fromSemanticCache,
+                    fromSemanticGuardrail
+            );
             return true;
         } catch (RuntimeException ex) {
             log.warn("Skipping working-memory save because chat persistence failed.", ex);
@@ -312,7 +323,9 @@ public class ChatService {
                 analysisTurn.response(),
                 executionSteps,
                 analysisTurn.tickers(),
-                analysisTurn.triggeredAgents()
+                analysisTurn.triggeredAgents(),
+                analysisTurn.fromSemanticCache(),
+                analysisTurn.fromSemanticGuardrail()
         );
         ChatExecutionStep saveStep = systemStep(
                 "TURN_SAVE",

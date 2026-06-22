@@ -127,7 +127,9 @@ public class AmsChatMemoryRepository implements ChatMemoryRepository {
             String assistantResponse,
             List<ChatExecutionStep> executionSteps,
             List<String> tickers,
-            List<String> triggeredAgents
+            List<String> triggeredAgents,
+            boolean fromSemanticCache,
+            boolean fromSemanticGuardrail
     ) {
         ConversationId parsed = ConversationId.parse(conversationId);
         String userId = parsed.userId();
@@ -153,7 +155,13 @@ public class AmsChatMemoryRepository implements ChatMemoryRepository {
                         assistant,
                         userId,
                         MEMORY_MODEL,
-                        assistantMetadata(executionSteps, tickers, triggeredAgents)
+                        assistantMetadata(
+                                executionSteps,
+                                tickers,
+                                triggeredAgents,
+                                fromSemanticCache,
+                                fromSemanticGuardrail
+                        )
                 );
             }
 
@@ -287,9 +295,17 @@ public class AmsChatMemoryRepository implements ChatMemoryRepository {
     private Map<String, Object> assistantMetadata(
             List<ChatExecutionStep> executionSteps,
             List<String> tickers,
-            List<String> triggeredAgents
+            List<String> triggeredAgents,
+            boolean fromSemanticCache,
+            boolean fromSemanticGuardrail
     ) {
         Map<String, Object> metadata = new LinkedHashMap<>();
+        if (fromSemanticCache) {
+            metadata.put("fromSemanticCache", true);
+        }
+        if (fromSemanticGuardrail) {
+            metadata.put("fromSemanticGuardrail", true);
+        }
         if (executionSteps != null && !executionSteps.isEmpty()) {
             metadata.put("executionSteps", executionSteps.stream()
                     .map(this::executionStepMetadata)

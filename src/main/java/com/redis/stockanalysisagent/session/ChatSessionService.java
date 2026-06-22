@@ -154,7 +154,9 @@ public class ChatSessionService {
                         message.content(),
                         message.timestamp(),
                         tokenUsage(message.metadata() == null ? null : message.metadata().get("tokenUsage")),
-                        executionSteps(message.metadata())
+                        executionSteps(message.metadata()),
+                        booleanFlag(message.metadata(), "fromSemanticCache"),
+                        booleanFlag(message.metadata(), "fromSemanticGuardrail")
                 )
                 : null;
     }
@@ -485,6 +487,14 @@ public class ChatSessionService {
                 integerValue(raw.get("completionTokens")),
                 integerValue(raw.get("totalTokens"))
         );
+    }
+
+    private boolean booleanFlag(Map<String, Object> metadata, String key) {
+        Object value = metadata == null ? null : metadata.get(key);
+        if (value instanceof Boolean booleanValue) {
+            return booleanValue;
+        }
+        return value != null && Boolean.parseBoolean(value.toString());
     }
 
     private List<ExternalDataAccess> dataAccesses(Object value) {

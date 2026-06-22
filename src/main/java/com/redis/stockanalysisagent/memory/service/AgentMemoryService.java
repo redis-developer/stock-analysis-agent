@@ -7,6 +7,8 @@ import com.redis.agentmemory.models.workingmemory.WorkingMemory;
 import com.redis.agentmemory.models.workingmemory.WorkingMemoryResponse;
 import com.redis.stockanalysisagent.memory.AgentMemoryProperties;
 import com.redis.stockanalysisagent.memory.service.AgentMemoryApiModels.*;
+import com.redis.stockanalysisagent.reliability.CircuitBreakerService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpMethod;
 import org.springframework.stereotype.Service;
@@ -18,6 +20,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 @Service
@@ -34,15 +37,23 @@ public class AgentMemoryService {
     private final String storeId;
     private final String namespace;
     private final Double similarityThreshold;
+    private final CircuitBreakerService circuitBreakerService;
 
+    @Autowired
     public AgentMemoryService(
             @Qualifier("agentMemoryWebClient") WebClient client,
-            AgentMemoryProperties properties
+            AgentMemoryProperties properties,
+            CircuitBreakerService circuitBreakerService
     ) {
         this.client = client;
         this.storeId = requireRamIdentifier(properties.getStoreId(), "agent-memory.store-id");
         this.namespace = requireRamIdentifier(properties.getNamespace(), "agent-memory.namespace");
         this.similarityThreshold = properties.getSimilarityThreshold();
+        this.circuitBreakerService = circuitBreakerService;
+    }
+
+    AgentMemoryService(WebClient client, AgentMemoryProperties properties) {
+        this(client, properties, null);
     }
 
     public WorkingMemoryResponse getWorkingMemory(String sessionId, String userId, String modelName) {
@@ -65,19 +76,20 @@ public class AgentMemoryService {
             String pageToken = null;
             do {
                 String currentPageToken = pageToken;
-                ListSessionsResponse response = client.get()
-                        .uri(uriBuilder -> {
-                            var builder = uriBuilder
-                                    .path("/v1/stores/{storeId}/session-memory")
-                                    .queryParam("limit", LIST_SESSIONS_PAGE_SIZE);
-                            if (hasText(currentPageToken)) {
-                                builder.queryParam("pageToken", currentPageToken);
-                            }
-                            return builder.build(storeId);
-                        })
-                        .retrieve()
-                        .bodyToMono(ListSessionsResponse.class)
-                        .block();
+                ListSessionsResponse response = callAgentMemory(() ->
+                        client.get()
+                                .uri(uriBuilder -> {
+                                    var builder = uriBuilder
+                                            .path("/v1/stores/{storeId}/session-memory")
+                                            .queryParam("limit", LIST_SESSIONS_PAGE_SIZE);
+                                    if (hasText(currentPageToken)) {
+                                        builder.queryParam("pageToken", currentPageToken);
+                                    }
+                                    return builder.build(storeId);
+                                })
+                                .retrieve()
+                                .bodyToMono(ListSessionsResponse.class)
+                                .block());
                 if (response == null) {
                     return sessions;
                 }
@@ -160,11 +172,14 @@ public class AgentMemoryService {
         }
 
         try {
-            client.delete()
-                    .uri("/v1/stores/{storeId}/session-memory/{sessionId}", storeId, sessionId)
-                    .retrieve()
-                    .toBodilessEntity()
-                    .block();
+            callAgentMemory(() -> {
+                client.delete()
+                        .uri("/v1/stores/{storeId}/session-memory/{sessionId}", storeId, sessionId)
+                        .retrieve()
+                        .toBodilessEntity()
+                        .block();
+                return null;
+            });
         } catch (WebClientResponseException.NotFound ignored) {
         } catch (WebClientResponseException e) {
             throw new RuntimeException("Failed to delete Agent Memory Server session memory: " + errorSummary(e), e);
@@ -187,12 +202,13 @@ public class AgentMemoryService {
                         LONG_TERM_MEMORY_PAGE_SIZE,
                         pageToken
                 );
-                SearchLongTermMemoryResponse response = client.post()
-                        .uri("/v1/stores/{storeId}/long-term-memory/search", storeId)
-                        .bodyValue(request)
-                        .retrieve()
-                        .bodyToMono(SearchLongTermMemoryResponse.class)
-                        .block();
+                SearchLongTermMemoryResponse response = callAgentMemory(() ->
+                        client.post()
+                                .uri("/v1/stores/{storeId}/long-term-memory/search", storeId)
+                                .bodyValue(request)
+                                .retrieve()
+                                .bodyToMono(SearchLongTermMemoryResponse.class)
+                                .block());
                 if (response == null) {
                     break;
                 }
@@ -230,12 +246,13 @@ public class AgentMemoryService {
         );
 
         try {
-            BulkCreateLongTermMemoriesResponse response = client.post()
-                    .uri("/v1/stores/{storeId}/long-term-memory", storeId)
-                    .bodyValue(new BulkCreateLongTermMemoriesRequest(List.of(memory)))
-                    .retrieve()
-                    .bodyToMono(BulkCreateLongTermMemoriesResponse.class)
-                    .block();
+            BulkCreateLongTermMemoriesResponse response = callAgentMemory(() ->
+                    client.post()
+                            .uri("/v1/stores/{storeId}/long-term-memory", storeId)
+                            .bodyValue(new BulkCreateLongTermMemoriesRequest(List.of(memory)))
+                            .retrieve()
+                            .bodyToMono(BulkCreateLongTermMemoriesResponse.class)
+                            .block());
             if (response != null && response.errors() != null && !response.errors().isEmpty()) {
                 throw new RuntimeException("Agent Memory Server long term memory create failed: " + response.errors());
             }
@@ -266,12 +283,14 @@ public class AgentMemoryService {
             SearchLongTermMemoryRequest pageRequest = request;
             String pageToken = null;
             do {
-                SearchLongTermMemoryResponse response = client.post()
-                        .uri("/v1/stores/{storeId}/long-term-memory/search", storeId)
-                        .bodyValue(pageRequest)
-                        .retrieve()
-                        .bodyToMono(SearchLongTermMemoryResponse.class)
-                        .block();
+                SearchLongTermMemoryRequest currentPageRequest = pageRequest;
+                SearchLongTermMemoryResponse response = callAgentMemory(() ->
+                        client.post()
+                                .uri("/v1/stores/{storeId}/long-term-memory/search", storeId)
+                                .bodyValue(currentPageRequest)
+                                .retrieve()
+                                .bodyToMono(SearchLongTermMemoryResponse.class)
+                                .block());
                 if (response == null) {
                     break;
                 }
@@ -328,11 +347,12 @@ public class AgentMemoryService {
     }
 
     private SessionMemory fetchSessionMemory(String sessionId) {
-        return client.get()
-                .uri("/v1/stores/{storeId}/session-memory/{sessionId}", storeId, sessionId)
-                .retrieve()
-                .bodyToMono(SessionMemory.class)
-                .block();
+        return callAgentMemory(() ->
+                client.get()
+                        .uri("/v1/stores/{storeId}/session-memory/{sessionId}", storeId, sessionId)
+                        .retrieve()
+                        .bodyToMono(SessionMemory.class)
+                        .block());
     }
 
     private LongTermMemoryFilter longTermMemoryOwnerFilter(String userId) {
@@ -422,12 +442,13 @@ public class AgentMemoryService {
         );
 
         try {
-            AddSessionEventResponse response = client.post()
-                    .uri("/v1/stores/{storeId}/session-memory/events", storeId)
-                    .bodyValue(request)
-                    .retrieve()
-                    .bodyToMono(AddSessionEventResponse.class)
-                    .block();
+            AddSessionEventResponse response = callAgentMemory(() ->
+                    client.post()
+                            .uri("/v1/stores/{storeId}/session-memory/events", storeId)
+                            .bodyValue(request)
+                            .retrieve()
+                            .bodyToMono(AddSessionEventResponse.class)
+                            .block());
             if (response == null || response.event() == null) {
                 throw new RuntimeException("Agent Memory Server session event response did not include an event");
             }
@@ -447,12 +468,13 @@ public class AgentMemoryService {
             }
 
             try {
-                BulkDeleteLongTermMemoriesResponse response = client.method(HttpMethod.DELETE)
-                        .uri("/v1/stores/{storeId}/long-term-memory", storeId)
-                        .bodyValue(new BulkDeleteLongTermMemoriesRequest(batch))
-                        .retrieve()
-                        .bodyToMono(BulkDeleteLongTermMemoriesResponse.class)
-                        .block();
+                BulkDeleteLongTermMemoriesResponse response = callAgentMemory(() ->
+                        client.method(HttpMethod.DELETE)
+                                .uri("/v1/stores/{storeId}/long-term-memory", storeId)
+                                .bodyValue(new BulkDeleteLongTermMemoriesRequest(batch))
+                                .retrieve()
+                                .bodyToMono(BulkDeleteLongTermMemoriesResponse.class)
+                                .block());
                 if (response != null && response.errors() != null && !response.errors().isEmpty()) {
                     throw new RuntimeException("Agent Memory Server long term memory delete failed: " + response.errors());
                 }
@@ -462,6 +484,13 @@ public class AgentMemoryService {
             }
         }
         return deleted;
+    }
+
+    private <T> T callAgentMemory(Supplier<T> supplier) {
+        if (circuitBreakerService == null) {
+            return supplier.get();
+        }
+        return circuitBreakerService.call("agent-memory", supplier);
     }
 
     private WorkingMemoryResponse toWorkingMemoryResponse(SessionMemory sessionMemory) {

@@ -41,7 +41,9 @@ class AmsChatMemoryRepositoryTests {
                 "answer",
                 List.of(step),
                 List.of("aapl"),
-                List.of("market_data")
+                List.of("market_data"),
+                true,
+                false
         );
 
         verify(agentMemoryService).appendMessageToWorkingMemory(
@@ -53,6 +55,8 @@ class AmsChatMemoryRepositoryTests {
         );
 
         Map<String, Object> metadata = metadataCaptor.getValue();
+        assertThat(metadata.get("fromSemanticCache")).isEqualTo(true);
+        assertThat(metadata).doesNotContainKey("fromSemanticGuardrail");
         assertThat(metadata.get("tickers")).isEqualTo(List.of("AAPL"));
         assertThat(metadata.get("triggeredAgents")).isEqualTo(List.of("MARKET_DATA"));
         assertThat(metadata.get("tokenUsage")).isEqualTo(Map.of(

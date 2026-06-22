@@ -77,7 +77,8 @@ class ChatSessionServiceTests {
                                         "kind", "system",
                                         "durationMs", 12,
                                         "summary", "Checked cache."
-                                ))
+                                )),
+                                "fromSemanticCache", true
                         )
                 )
         ));
@@ -91,6 +92,8 @@ class ChatSessionServiceTests {
                     assertThat(message.tokenUsage().promptTokens()).isEqualTo(20);
                     assertThat(message.tokenUsage().completionTokens()).isEqualTo(8);
                     assertThat(message.tokenUsage().totalTokens()).isEqualTo(28);
+                    assertThat(message.fromSemanticCache()).isTrue();
+                    assertThat(message.fromSemanticGuardrail()).isFalse();
                     assertThat(message.executionSteps())
                             .singleElement()
                             .satisfies(step -> {

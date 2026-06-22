@@ -1,6 +1,9 @@
 package com.redis.stockanalysisagent.cache;
 
 import com.redis.stockanalysisagent.chat.ChatProgressPublisher;
+import com.redis.stockanalysisagent.reliability.CircuitBreakerOpenException;
+import com.redis.stockanalysisagent.reliability.CircuitBreakerService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
 import org.springframework.stereotype.Component;
@@ -17,11 +20,25 @@ public class ExternalDataCache {
     private final CacheManager cacheManager;
     private final ChatProgressPublisher progressPublisher;
     private final ExternalApiUsageService apiUsageService;
+    private final CircuitBreakerService circuitBreakerService;
     private final ConcurrentMap<String, Object> locks = new ConcurrentHashMap<>();
     private final ThreadLocal<List<ExternalDataAccess>> recordedAccesses = ThreadLocal.withInitial(ArrayList::new);
     private final ThreadLocal<Boolean> cachingEnabled = ThreadLocal.withInitial(() -> true);
 
+    @Autowired
     public ExternalDataCache(
+            CacheManager cacheManager,
+            ChatProgressPublisher progressPublisher,
+            ExternalApiUsageService apiUsageService,
+            CircuitBreakerService circuitBreakerService
+    ) {
+        this.cacheManager = cacheManager;
+        this.progressPublisher = progressPublisher;
+        this.apiUsageService = apiUsageService;
+        this.circuitBreakerService = circuitBreakerService;
+    }
+
+    ExternalDataCache(
             CacheManager cacheManager,
             ChatProgressPublisher progressPublisher,
             ExternalApiUsageService apiUsageService
@@ -29,6 +46,7 @@ public class ExternalDataCache {
         this.cacheManager = cacheManager;
         this.progressPublisher = progressPublisher;
         this.apiUsageService = apiUsageService;
+        this.circuitBreakerService = null;
     }
 
     @SuppressWarnings("unchecked")
@@ -119,8 +137,10 @@ public class ExternalDataCache {
                 "Fetching " + dataProgressName(cacheName, key) + "."
         );
         try {
-            apiUsageService.recordHitForCacheName(cacheName);
-            T loaded = loader.get();
+            T loaded = loadWithCircuitBreaker(cacheName, () -> {
+                apiUsageService.recordHitForCacheName(cacheName);
+                return loader.get();
+            });
             progressPublisher.completed(
                     id,
                     label,
@@ -129,6 +149,15 @@ public class ExternalDataCache {
                     "Fetched " + dataProgressName(cacheName, key) + "."
             );
             return loaded;
+        } catch (CircuitBreakerOpenException ex) {
+            progressPublisher.failed(
+                    id,
+                    "Circuit breaker",
+                    ChatProgressPublisher.KIND_SYSTEM,
+                    elapsedDurationMs(startedAt),
+                    "Blocked " + providerLabel(ex.providerId()) + " call because provider state is " + ex.state().state() + "."
+            );
+            throw ex;
         } catch (RuntimeException ex) {
             progressPublisher.failed(
                     id,
@@ -139,6 +168,19 @@ public class ExternalDataCache {
             );
             throw ex;
         }
+    }
+
+    private <T> T loadWithCircuitBreaker(String cacheName, Supplier<T> loader) {
+        if (circuitBreakerService == null) {
+            return loader.get();
+        }
+
+        String providerId = providerId(cacheName);
+        if (providerId == null) {
+            return loader.get();
+        }
+
+        return circuitBreakerService.call(providerId, loader);
     }
 
     private void recordCacheHitProgress(String cacheName, String key, long startedAt) {
@@ -172,6 +214,29 @@ public class ExternalDataCache {
             case CacheNames.SEC_TICKER_INDEX, CacheNames.SEC_COMPANY_FACTS, CacheNames.SEC_SUBMISSIONS -> "Calling SEC API";
             case CacheNames.TAVILY_NEWS_SEARCH -> "Calling Tavily API";
             default -> "Calling third party API";
+        };
+    }
+
+    private String providerId(String cacheName) {
+        if (cacheName == null) {
+            return null;
+        }
+
+        return switch (cacheName) {
+            case CacheNames.MARKET_DATA_QUOTES, CacheNames.TECHNICAL_ANALYSIS_SNAPSHOTS,
+                 CacheNames.HISTORICAL_CANDLES -> "twelve-data";
+            case CacheNames.SEC_TICKER_INDEX, CacheNames.SEC_COMPANY_FACTS, CacheNames.SEC_SUBMISSIONS -> "sec";
+            case CacheNames.TAVILY_NEWS_SEARCH -> "tavily";
+            default -> null;
+        };
+    }
+
+    private String providerLabel(String providerId) {
+        return switch (providerId) {
+            case "twelve-data" -> "Twelve Data";
+            case "sec" -> "SEC";
+            case "tavily" -> "Tavily";
+            default -> providerId;
         };
     }
 

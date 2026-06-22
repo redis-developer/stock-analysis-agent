@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Stock Analysis Agent</title>
-    <link rel="stylesheet" href="chat.css?v=20260621-hide-workflow-start">
+    <link rel="stylesheet" href="chat.css?v=20260622-circuit-breaker-value">
 </head>
 <body>
 <section id="login-screen" class="login-screen" aria-label="Login">
@@ -132,6 +132,27 @@
                             value="10"
                         >
                     </div>
+                </div>
+                <div class="circuit-panel" aria-label="Provider circuit breakers">
+                    <div class="circuit-panel__header">
+                        <div>
+                            <p class="session-sidebar__eyebrow">Reliability</p>
+                            <h2>Provider health</h2>
+                        </div>
+                        <button
+                            id="refresh-circuit-breakers-button"
+                            class="provider-hit-card__reset"
+                            type="button"
+                            title="Refresh provider health"
+                            aria-label="Refresh provider health"
+                        >
+                            <svg aria-hidden="true" viewBox="0 0 24 24">
+                                <path d="M3 12a9 9 0 1 0 3-6.7"></path>
+                                <path d="M3 4v6h6"></path>
+                            </svg>
+                        </button>
+                    </div>
+                    <div id="circuit-breaker-list" class="circuit-breaker-list" role="list"></div>
                 </div>
                 <button id="logout-button" class="btn btn-secondary" type="button">Log out</button>
             </div>
@@ -432,6 +453,6 @@
     </div>
 </template>
 
-<script src="chat.js?v=20260621-hide-workflow-start" defer></script>
+<script src="chat.js?v=20260622-circuit-breaker-value" defer></script>
 </body>
 </html>

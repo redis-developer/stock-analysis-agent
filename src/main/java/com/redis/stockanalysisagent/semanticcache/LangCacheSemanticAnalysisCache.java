@@ -1,5 +1,6 @@
 package com.redis.stockanalysisagent.semanticcache;
 
+import com.redis.stockanalysisagent.reliability.CircuitBreakerService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
@@ -24,8 +25,12 @@ public class LangCacheSemanticAnalysisCache implements SemanticAnalysisCache {
     private final long ttlMillis;
     private final List<String> searchStrategies;
     private final Map<String, String> attributes;
+    private final CircuitBreakerService circuitBreakerService;
 
-    public LangCacheSemanticAnalysisCache(SemanticCacheProperties properties) {
+    public LangCacheSemanticAnalysisCache(
+            SemanticCacheProperties properties,
+            CircuitBreakerService circuitBreakerService
+    ) {
         SemanticCacheProperties.LangCache langCache = properties.getLangCache();
         this.client = WebClient.builder()
                 .baseUrl(requireText(langCache.getUrl(), "stock-analysis.semantic-cache.lang-cache.url"))
@@ -37,6 +42,7 @@ public class LangCacheSemanticAnalysisCache implements SemanticAnalysisCache {
         this.ttlMillis = Math.max(1, properties.getTtlSeconds()) * 1000L;
         this.searchStrategies = searchStrategies(langCache);
         this.attributes = langCache.isIncludeKindAttribute() ? Map.of("kind", CACHE_KIND) : null;
+        this.circuitBreakerService = circuitBreakerService;
     }
 
     @Override
@@ -49,12 +55,13 @@ public class LangCacheSemanticAnalysisCache implements SemanticAnalysisCache {
         );
 
         try {
-            LangCacheApiModels.SearchResponse response = client.post()
-                    .uri("/v1/caches/{cacheId}/entries/search", cacheId)
-                    .bodyValue(searchRequest)
-                    .retrieve()
-                    .bodyToMono(LangCacheApiModels.SearchResponse.class)
-                    .block();
+            LangCacheApiModels.SearchResponse response = circuitBreakerService.call("lang-cache", () ->
+                    client.post()
+                            .uri("/v1/caches/{cacheId}/entries/search", cacheId)
+                            .bodyValue(searchRequest)
+                            .retrieve()
+                            .bodyToMono(LangCacheApiModels.SearchResponse.class)
+                            .block());
             if (response == null || response.data() == null || response.data().isEmpty()) {
                 return Optional.empty();
             }
@@ -81,12 +88,13 @@ public class LangCacheSemanticAnalysisCache implements SemanticAnalysisCache {
         );
 
         try {
-            LangCacheApiModels.SetResponse setResponse = client.post()
-                    .uri("/v1/caches/{cacheId}/entries", cacheId)
-                    .bodyValue(setRequest)
-                    .retrieve()
-                    .bodyToMono(LangCacheApiModels.SetResponse.class)
-                    .block();
+            LangCacheApiModels.SetResponse setResponse = circuitBreakerService.call("lang-cache", () ->
+                    client.post()
+                            .uri("/v1/caches/{cacheId}/entries", cacheId)
+                            .bodyValue(setRequest)
+                            .retrieve()
+                            .bodyToMono(LangCacheApiModels.SetResponse.class)
+                            .block());
             log.info("LangCache stored response with entry id {}",
                     setResponse != null ? setResponse.entryId() : null);
         } catch (WebClientResponseException e) {

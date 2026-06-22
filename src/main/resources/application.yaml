@@ -48,6 +48,12 @@ stock-analysis:
     recovery:
       scan-delay-ms: ${STOCK_ANALYSIS_WORKFLOW_RECOVERY_SCAN_DELAY_MS:5000}
       initial-delay-ms: ${STOCK_ANALYSIS_WORKFLOW_RECOVERY_INITIAL_DELAY_MS:5000}
+  circuit-breaker:
+    enabled: ${STOCK_ANALYSIS_CIRCUIT_BREAKER_ENABLED:true}
+    failure-threshold: ${STOCK_ANALYSIS_CIRCUIT_BREAKER_FAILURE_THRESHOLD:3}
+    open-duration: ${STOCK_ANALYSIS_CIRCUIT_BREAKER_OPEN_DURATION:30s}
+    probe-timeout: ${STOCK_ANALYSIS_CIRCUIT_BREAKER_PROBE_TIMEOUT:10s}
+    state-ttl: ${STOCK_ANALYSIS_CIRCUIT_BREAKER_STATE_TTL:7d}
   market-data:
     provider: twelve-data
     twelve-data:

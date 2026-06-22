@@ -4,14 +4,25 @@
     const maxRetrievedMemoriesLimit = 20;
     const defaultRateLimitLimit = 6;
     const sessionRefreshIntervalMs = 2000;
+    const circuitBreakerRefreshIntervalMs = 2000;
     const memoryTabAll = "all";
     const memoryTabCurrentChat = "current-chat";
+    const circuitBreakerProviders = [
+        { providerId: "twelve-data", label: "Twelve Data" },
+        { providerId: "sec", label: "SEC" },
+        { providerId: "tavily", label: "Tavily" },
+        { providerId: "lang-cache", label: "LangCache" },
+        { providerId: "agent-memory", label: "Agent Memory" }
+    ];
 
     const state = {
         loading: false,
         sessionsRefreshing: false,
         sessionRefreshTimer: null,
         sessionRefreshInFlight: false,
+        circuitBreakerRefreshTimer: null,
+        circuitBreakerRefreshInFlight: false,
+        circuitBreakersLoading: false,
         memoriesLoading: false,
         cacheLoading: false,
         messages: [],
@@ -44,6 +55,7 @@
             tavilyApiHits: 0,
             twelveDataApiHits: 0
         },
+        circuitBreakers: defaultCircuitBreakers(),
         sessionManagementEnabled: true
     };
 
@@ -103,6 +115,8 @@
         secApiResetButton: document.getElementById("sec-api-reset-button"),
         tavilyApiResetButton: document.getElementById("tavily-api-reset-button"),
         twelveDataApiResetButton: document.getElementById("twelve-data-api-reset-button"),
+        circuitBreakerList: document.getElementById("circuit-breaker-list"),
+        refreshCircuitBreakersButton: document.getElementById("refresh-circuit-breakers-button"),
         sessionIdValue: document.getElementById("session-id-value"),
         emptyStateTemplate: document.getElementById("empty-state-template")
     };
@@ -145,6 +159,8 @@
         elements.secApiResetButton.addEventListener("click", onProviderUsageResetClick);
         elements.tavilyApiResetButton.addEventListener("click", onProviderUsageResetClick);
         elements.twelveDataApiResetButton.addEventListener("click", onProviderUsageResetClick);
+        elements.refreshCircuitBreakersButton.addEventListener("click", onCircuitBreakersRefreshClick);
+        elements.circuitBreakerList.addEventListener("click", onCircuitBreakerListClick);
         elements.retrievedMemoriesLimitInput.addEventListener("input", onRetrievedMemoriesLimitInput);
         elements.retrievedMemoriesLimitInput.addEventListener("blur", commitRetrievedMemoriesLimit);
         elements.accountMenuButton.addEventListener("click", onAccountMenuClick);
@@ -197,9 +213,12 @@
         closeMobileTools();
         applySessionManagementState();
         renderIdentity();
+        renderCircuitBreakers();
         renderSessions();
         renderMessages();
         autoResizeTextarea();
+        refreshCircuitBreakers(false);
+        syncCircuitBreakerRefreshLoop();
         if (isSessionManagementEnabled()) {
             refreshSessions();
             loadSessionMessages(state.sessionId, false);
@@ -212,6 +231,7 @@
 
     function showLogin() {
         stopSessionRefreshLoop();
+        stopCircuitBreakerRefreshLoop();
         elements.chatApp.hidden = true;
         elements.loginScreen.hidden = false;
         closeAccountMenu();
@@ -263,8 +283,10 @@
     function onVisibilityChange() {
         if (!document.hidden) {
             refreshActiveSessionFromServer();
+            refreshCircuitBreakers(false);
         }
         syncSessionRefreshLoop();
+        syncCircuitBreakerRefreshLoop();
     }
 
     async function onLogout() {
@@ -275,6 +297,7 @@
         }
 
         stopSessionRefreshLoop();
+        stopCircuitBreakerRefreshLoop();
         try {
             await fetch(new URL("./api/chat/logout", window.location.href), {
                 method: "POST"
@@ -302,6 +325,7 @@
         state.apiCachingEnabled = true;
         state.semanticCachingEnabled = true;
         state.rateLimitingEnabled = true;
+        state.circuitBreakers = defaultCircuitBreakers();
         resetRateLimitStatus();
         clearLegacyStoredSettings();
         clearStoredSession();
@@ -411,6 +435,36 @@
             renderProviderUsage();
         } catch (error) {
             setStatus("Reset failed", "error");
+        } finally {
+            button.disabled = false;
+        }
+    }
+
+    async function onCircuitBreakersRefreshClick() {
+        await refreshCircuitBreakers(true);
+    }
+
+    async function onCircuitBreakerListClick(event) {
+        const button = event.target.closest("[data-circuit-provider]");
+        if (!button) {
+            return;
+        }
+
+        const providerId = normalizeProviderId(button.dataset.circuitProvider);
+        if (!providerId) {
+            return;
+        }
+
+        const current = circuitBreakerByProvider(providerId);
+        const enabled = !(current && current.failureSimulationEnabled);
+        button.disabled = true;
+        try {
+            const updated = await updateFailureSimulation(providerId, enabled);
+            mergeCircuitBreakerStatus(updated);
+            renderCircuitBreakers();
+            setStatus(enabled ? "Failure simulation on" : "Failure simulation off");
+        } catch (error) {
+            setStatus("Simulator update failed", "error");
         } finally {
             button.disabled = false;
         }
@@ -1031,6 +1085,47 @@
             method: "POST"
         });
 
+        const contentType = response.headers.get("content-type") || "";
+        const rawBody = await response.text();
+        const body = contentType.includes("application/json") ? safeParseJson(rawBody) : null;
+
+        if (!response.ok) {
+            if (handleUnauthorizedResponse(response)) {
+                throw new Error("Login is required.");
+            }
+            throw new Error(extractErrorMessage(body, rawBody, response.status));
+        }
+
+        return body || {};
+    }
+
+    async function fetchCircuitBreakers() {
+        const response = await fetch(new URL("./api/circuit-breakers", window.location.href));
+        const contentType = response.headers.get("content-type") || "";
+        const rawBody = await response.text();
+        const body = contentType.includes("application/json") ? safeParseJson(rawBody) : null;
+
+        if (!response.ok) {
+            if (handleUnauthorizedResponse(response)) {
+                throw new Error("Login is required.");
+            }
+            throw new Error(extractErrorMessage(body, rawBody, response.status));
+        }
+
+        return Array.isArray(body) ? body : [];
+    }
+
+    async function updateFailureSimulation(providerId, enabled) {
+        const response = await fetch(new URL(
+            "./api/circuit-breakers/" + encodeURIComponent(providerId) + "/simulation",
+            window.location.href
+        ), {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ enabled: Boolean(enabled) })
+        });
         const contentType = response.headers.get("content-type") || "";
         const rawBody = await response.text();
         const body = contentType.includes("application/json") ? safeParseJson(rawBody) : null;
@@ -1952,6 +2047,7 @@
         );
         renderRateLimitStatus();
         renderProviderUsage();
+        renderCircuitBreakers();
         if (state.memoriesOpen) {
             renderMemories();
         }
@@ -1969,6 +2065,78 @@
         elements.secApiHitsValue.textContent = String(state.providerUsage.secApiHits);
         elements.tavilyApiHitsValue.textContent = String(state.providerUsage.tavilyApiHits);
         elements.twelveDataApiHitsValue.textContent = String(state.providerUsage.twelveDataApiHits);
+    }
+
+    function renderCircuitBreakers() {
+        const statuses = normalizeCircuitBreakerStatuses(state.circuitBreakers);
+        elements.circuitBreakerList.replaceChildren();
+        elements.refreshCircuitBreakersButton.disabled = state.circuitBreakersLoading;
+
+        for (const status of statuses) {
+            elements.circuitBreakerList.appendChild(buildCircuitBreakerRow(status));
+        }
+    }
+
+    function buildCircuitBreakerRow(status) {
+        const providerId = normalizeProviderId(status.providerId);
+        const breaker = status.circuitBreaker || {};
+        const stateName = normalizeCircuitState(breaker.state);
+        const row = document.createElement("div");
+        row.className = "circuit-provider";
+        row.classList.toggle("is-open", stateName === "OPEN");
+        row.classList.toggle("is-half-open", stateName === "HALF_OPEN");
+        row.classList.toggle("is-simulated", Boolean(status.failureSimulationEnabled));
+        row.setAttribute("role", "listitem");
+
+        const header = document.createElement("div");
+        header.className = "circuit-provider__header";
+
+        const name = document.createElement("span");
+        name.className = "circuit-provider__name";
+        name.textContent = status.label || formatProviderLabel(providerId);
+        header.appendChild(name);
+
+        const badge = document.createElement("span");
+        badge.className = "circuit-provider__state circuit-provider__state--" + stateName.toLowerCase().replace("_", "-");
+        badge.textContent = formatCircuitState(stateName);
+        header.appendChild(badge);
+        row.appendChild(header);
+
+        const meta = document.createElement("div");
+        meta.className = "circuit-provider__meta";
+        meta.appendChild(circuitMetaItem("Failures", String(normalizeCount(breaker.failureCount))));
+        meta.appendChild(circuitMetaItem("Blocked", String(normalizeCount(breaker.blockedCallCount))));
+        const openUntil = formatTimestamp(breaker.openUntil);
+        if (openUntil) {
+            meta.appendChild(circuitMetaItem("Retry", openUntil));
+        }
+        row.appendChild(meta);
+
+        const toggle = document.createElement("button");
+        toggle.className = "identity-toggle circuit-provider__toggle";
+        toggle.type = "button";
+        toggle.dataset.circuitProvider = providerId;
+        toggle.setAttribute("aria-pressed", String(Boolean(status.failureSimulationEnabled)));
+        toggle.classList.toggle("is-off", !status.failureSimulationEnabled);
+        toggle.innerHTML = ""
+            + "<span class=\"identity-toggle__text\">Outage</span>"
+            + "<span class=\"identity-toggle__state\"></span>"
+            + "<span class=\"identity-toggle__switch\" aria-hidden=\"true\"><span class=\"identity-toggle__knob\"></span></span>";
+        const toggleState = toggle.querySelector(".identity-toggle__state");
+        if (toggleState) {
+            toggleState.textContent = status.failureSimulationEnabled ? "On" : "Off";
+        }
+        toggle.title = (status.failureSimulationEnabled ? "Disable" : "Enable") + " simulated outage for " + (status.label || providerId);
+        row.appendChild(toggle);
+
+        return row;
+    }
+
+    function circuitMetaItem(label, value) {
+        const item = document.createElement("span");
+        item.className = "circuit-provider__meta-item";
+        item.textContent = label + " " + value;
+        return item;
     }
 
     function renderCacheToggle(button, enabled, label) {
@@ -2409,6 +2577,8 @@
         applyProviderUsage(context.providerUsage);
         state.sessionManagementEnabled = context.sessionManagementEnabled !== false;
         applySessionManagementState();
+        renderCircuitBreakers();
+        syncCircuitBreakerRefreshLoop();
     }
 
     function applyProviderUsage(usage) {
@@ -2430,6 +2600,133 @@
 
         const parsed = Number.parseInt(String(value), 10);
         return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+    }
+
+    function defaultCircuitBreakers() {
+        return circuitBreakerProviders.map(function (provider) {
+            return {
+                providerId: provider.providerId,
+                label: provider.label,
+                failureSimulationEnabled: false,
+                circuitBreaker: {
+                    providerId: provider.providerId,
+                    state: "CLOSED",
+                    failureCount: 0,
+                    blockedCallCount: 0,
+                    callsAllowed: true
+                }
+            };
+        });
+    }
+
+    function normalizeCircuitBreakerStatuses(statuses) {
+        const byProvider = {};
+        const list = Array.isArray(statuses) ? statuses : [];
+        for (const status of list) {
+            const normalized = normalizeCircuitBreakerStatus(status);
+            if (normalized) {
+                byProvider[normalized.providerId] = normalized;
+            }
+        }
+
+        return circuitBreakerProviders.map(function (provider) {
+            return byProvider[provider.providerId] || normalizeCircuitBreakerStatus(provider);
+        }).filter(Boolean);
+    }
+
+    function normalizeCircuitBreakerStatus(status) {
+        if (!status || typeof status !== "object") {
+            return null;
+        }
+
+        const providerId = normalizeProviderId(status.providerId);
+        if (!providerId) {
+            return null;
+        }
+
+        const breaker = status.circuitBreaker && typeof status.circuitBreaker === "object"
+            ? status.circuitBreaker
+            : {};
+        return {
+            providerId,
+            label: typeof status.label === "string" && status.label.trim()
+                ? status.label.trim()
+                : formatProviderLabel(providerId),
+            failureSimulationEnabled: Boolean(status.failureSimulationEnabled),
+            circuitBreaker: {
+                providerId,
+                state: normalizeCircuitState(breaker.state),
+                failureCount: normalizeCount(breaker.failureCount),
+                blockedCallCount: normalizeCount(breaker.blockedCallCount),
+                openedAt: breaker.openedAt || null,
+                openUntil: breaker.openUntil || null,
+                halfOpenAt: breaker.halfOpenAt || null,
+                lastFailureAt: breaker.lastFailureAt || null,
+                lastSuccessAt: breaker.lastSuccessAt || null,
+                reason: typeof breaker.reason === "string" ? breaker.reason : "",
+                callsAllowed: breaker.callsAllowed !== false
+            }
+        };
+    }
+
+    function mergeCircuitBreakerStatus(status) {
+        const normalized = normalizeCircuitBreakerStatus(status);
+        if (!normalized) {
+            return;
+        }
+
+        const statuses = normalizeCircuitBreakerStatuses(state.circuitBreakers);
+        const index = statuses.findIndex(function (existing) {
+            return existing.providerId === normalized.providerId;
+        });
+        if (index >= 0) {
+            statuses[index] = normalized;
+        } else {
+            statuses.push(normalized);
+        }
+        state.circuitBreakers = statuses;
+    }
+
+    function circuitBreakerByProvider(providerId) {
+        const normalizedProvider = normalizeProviderId(providerId);
+        return normalizeCircuitBreakerStatuses(state.circuitBreakers).find(function (status) {
+            return status.providerId === normalizedProvider;
+        });
+    }
+
+    function normalizeProviderId(providerId) {
+        return typeof providerId === "string"
+            ? providerId.trim().toLowerCase().replace(/[^a-z0-9_.-]+/g, "_")
+            : "";
+    }
+
+    function normalizeCircuitState(value) {
+        const stateName = typeof value === "string" ? value.trim().toUpperCase() : "";
+        if (stateName === "OPEN" || stateName === "HALF_OPEN") {
+            return stateName;
+        }
+        return "CLOSED";
+    }
+
+    function normalizeCount(value) {
+        const parsed = Number.parseInt(String(value), 10);
+        return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+    }
+
+    function formatCircuitState(value) {
+        const stateName = normalizeCircuitState(value);
+        if (stateName === "HALF_OPEN") {
+            return "Half open";
+        }
+        return stateName.charAt(0) + stateName.slice(1).toLowerCase();
+    }
+
+    function formatProviderLabel(providerId) {
+        const normalized = normalizeProviderId(providerId);
+        const configured = circuitBreakerProviders.find(function (provider) {
+            return provider.providerId === normalized;
+        });
+        return configured ? configured.label : normalized;
     }
 
     function isSessionManagementEnabled() {
@@ -2463,6 +2760,7 @@
         }
 
         stopSessionRefreshLoop();
+        stopCircuitBreakerRefreshLoop();
         state.userId = null;
         state.sessionId = null;
         state.messages = [];
@@ -2478,6 +2776,7 @@
         state.apiCachingEnabled = true;
         state.semanticCachingEnabled = true;
         state.rateLimitingEnabled = true;
+        state.circuitBreakers = defaultCircuitBreakers();
         resetRateLimitStatus();
         clearStoredSession();
         showLogin();
@@ -2490,6 +2789,58 @@
         } else {
             stopSessionRefreshLoop();
         }
+    }
+
+    async function refreshCircuitBreakers(reportStatus) {
+        if (!isLoggedIn() || state.circuitBreakerRefreshInFlight || elements.chatApp.hidden || document.hidden) {
+            return;
+        }
+
+        state.circuitBreakerRefreshInFlight = true;
+        state.circuitBreakersLoading = true;
+        renderCircuitBreakers();
+        try {
+            state.circuitBreakers = normalizeCircuitBreakerStatuses(await fetchCircuitBreakers());
+            renderCircuitBreakers();
+            if (reportStatus) {
+                setStatus("Provider health refreshed");
+            }
+        } catch (error) {
+            if (reportStatus) {
+                setStatus("Provider health failed", "error");
+            }
+        } finally {
+            state.circuitBreakerRefreshInFlight = false;
+            state.circuitBreakersLoading = false;
+            renderCircuitBreakers();
+        }
+    }
+
+    function syncCircuitBreakerRefreshLoop() {
+        if (isLoggedIn() && !elements.chatApp.hidden && !document.hidden) {
+            startCircuitBreakerRefreshLoop();
+        } else {
+            stopCircuitBreakerRefreshLoop();
+        }
+    }
+
+    function startCircuitBreakerRefreshLoop() {
+        if (state.circuitBreakerRefreshTimer) {
+            return;
+        }
+
+        state.circuitBreakerRefreshTimer = window.setInterval(function () {
+            refreshCircuitBreakers(false);
+        }, circuitBreakerRefreshIntervalMs);
+    }
+
+    function stopCircuitBreakerRefreshLoop() {
+        if (state.circuitBreakerRefreshTimer) {
+            window.clearInterval(state.circuitBreakerRefreshTimer);
+            state.circuitBreakerRefreshTimer = null;
+        }
+        state.circuitBreakerRefreshInFlight = false;
+        state.circuitBreakersLoading = false;
     }
 
     function startSessionRefreshLoop() {
@@ -3677,6 +4028,10 @@
     }
 
     function formatTimestamp(value) {
+        if (value === null || value === undefined || String(value).trim() === "") {
+            return "";
+        }
+
         const parsed = new Date(value);
         if (Number.isNaN(parsed.getTime())) {
             return "";
@@ -3801,6 +4156,8 @@
                 role: role,
                 content: content,
                 timestamp: timestamp,
+                fromSemanticCache: Boolean(message && message.fromSemanticCache),
+                fromSemanticGuardrail: Boolean(message && message.fromSemanticGuardrail),
                 tokenUsage: tokenUsage,
                 responseTimeMs: responseTimeMs,
                 executionSteps: executionSteps,
