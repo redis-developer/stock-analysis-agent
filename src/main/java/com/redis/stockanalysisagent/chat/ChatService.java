@@ -3,6 +3,7 @@ package com.redis.stockanalysisagent.chat;
 import com.redis.stockanalysisagent.agent.TokenUsageSummary;
 import com.redis.stockanalysisagent.cache.ExternalDataCache;
 import com.redis.stockanalysisagent.memory.AmsChatMemoryRepository;
+import com.redis.stockanalysisagent.session.ChatSessionIndexService;
 import com.redis.stockanalysisagent.session.ConversationId;
 import com.redis.stockanalysisagent.session.dto.ChatSessionMetadata;
 import com.redis.stockanalysisagent.session.dto.ChatSessionWorkflowStep;
@@ -12,6 +13,7 @@ import com.redis.stockanalysisagent.workflow.WorkflowService;
 import com.redis.stockanalysisagent.workflow.WorkflowStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -31,6 +33,7 @@ public class ChatService {
     private final ExternalDataCache externalDataCache;
     private final ChatProgressPublisher progressPublisher;
     private final WorkflowService workflowService;
+    private final ChatSessionIndexService sessionIndexService;
 
     public ChatService(
             AmsChatMemoryRepository memoryRepository,
@@ -39,11 +42,24 @@ public class ChatService {
             ChatProgressPublisher progressPublisher,
             WorkflowService workflowService
     ) {
+        this(memoryRepository, chatAnalysisService, externalDataCache, progressPublisher, workflowService, null);
+    }
+
+    @Autowired
+    public ChatService(
+            AmsChatMemoryRepository memoryRepository,
+            ChatAnalysisService chatAnalysisService,
+            ExternalDataCache externalDataCache,
+            ChatProgressPublisher progressPublisher,
+            WorkflowService workflowService,
+            ChatSessionIndexService sessionIndexService
+    ) {
         this.memoryRepository = memoryRepository;
         this.chatAnalysisService = chatAnalysisService;
         this.externalDataCache = externalDataCache;
         this.progressPublisher = progressPublisher;
         this.workflowService = workflowService;
+        this.sessionIndexService = sessionIndexService;
     }
 
     public ChatTurn chat(
@@ -141,6 +157,7 @@ public class ChatService {
         WorkflowService.Lease lease = null;
         String mode = executionMode(replayOrigin, saveTurnToMemory);
         try {
+            recordSessionStarted(userId, sessionId);
             workflow = startWorkflow(
                     userId,
                     sessionId,
@@ -222,6 +239,7 @@ public class ChatService {
             }
 
             workflow = completeWorkflow(workflow, executionSteps);
+            recordSessionCompleted(userId, sessionId);
             log.info(
                     "chat_workflow_completed mode={} workflowId={} status={} steps={}",
                     mode,
@@ -256,6 +274,18 @@ public class ChatService {
         } finally {
             closeLease(lease);
             WorkflowContextHolder.clear();
+        }
+    }
+
+    private void recordSessionStarted(String userId, String sessionId) {
+        if (sessionIndexService != null) {
+            sessionIndexService.recordSessionStarted(userId, sessionId);
+        }
+    }
+
+    private void recordSessionCompleted(String userId, String sessionId) {
+        if (sessionIndexService != null) {
+            sessionIndexService.recordSessionCompleted(userId, sessionId);
         }
     }
 

@@ -2,6 +2,7 @@ package com.redis.stockanalysisagent.memory.service;
 
 import com.redis.agentmemory.models.workingmemory.MemoryMessage;
 import com.redis.stockanalysisagent.memory.AgentMemoryProperties;
+import com.redis.stockanalysisagent.reliability.CircuitBreakerService;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -12,13 +13,20 @@ import org.springframework.web.reactive.function.client.ClientRequest;
 import org.springframework.web.reactive.function.client.ClientResponse;
 import org.springframework.web.reactive.function.client.ExchangeStrategies;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.core.publisher.Mono;
 
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class AgentMemoryServiceTests {
 
@@ -106,6 +114,27 @@ class AgentMemoryServiceTests {
         AgentMemoryService service = new AgentMemoryService(client, properties());
 
         assertThat(service.listSessions(null)).containsExactly("session-1");
+    }
+
+    @Test
+    void missingSessionMemoryDoesNotReachCircuitBreakerAsFailure() {
+        WebClient client = WebClient.builder()
+                .baseUrl("https://memory.example.test")
+                .exchangeFunction(request -> Mono.just(ClientResponse.create(HttpStatus.NOT_FOUND).build()))
+                .build();
+        CircuitBreakerService circuitBreakerService = mock(CircuitBreakerService.class);
+        when(circuitBreakerService.call(eq("agent-memory"), any())).thenAnswer(invocation -> {
+            Supplier<?> supplier = invocation.getArgument(1);
+            try {
+                return supplier.get();
+            } catch (WebClientResponseException.NotFound ex) {
+                throw new AssertionError("Missing session memory should not count as provider failure.", ex);
+            }
+        });
+        AgentMemoryService service = new AgentMemoryService(client, properties(), circuitBreakerService);
+
+        assertThat(service.listSessionEvents("missing-session", "alice")).isEmpty();
+        verify(circuitBreakerService).call(eq("agent-memory"), any());
     }
 
     @Test

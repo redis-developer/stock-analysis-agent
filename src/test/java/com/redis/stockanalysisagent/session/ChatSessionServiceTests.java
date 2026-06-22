@@ -3,6 +3,7 @@ package com.redis.stockanalysisagent.session;
 import com.redis.agentmemory.models.workingmemory.MemoryMessage;
 import com.redis.stockanalysisagent.memory.AmsChatMemoryRepository;
 import com.redis.stockanalysisagent.memory.AmsChatMemoryRepository.StoredMemoryMessage;
+import com.redis.stockanalysisagent.session.dto.ChatSessionMetadata;
 import com.redis.stockanalysisagent.session.dto.ChatSessionMessage;
 import com.redis.stockanalysisagent.workflow.WorkflowMetadata;
 import com.redis.stockanalysisagent.workflow.WorkflowService;
@@ -16,6 +17,9 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class ChatSessionServiceTests {
@@ -137,6 +141,69 @@ class ChatSessionServiceTests {
                     assertThat(summary.metadata().triggeredAgents())
                             .containsExactly("MARKET_DATA", "NEWS", "SYNTHESIS");
                 });
+    }
+
+    @Test
+    void sessionViewReusesStoredMessagesForMessagesAndMetadata() {
+        when(memoryRepository.findStoredMessagesByConversationId("alice:session-1")).thenReturn(List.of(
+                new StoredMemoryMessage(
+                        "user",
+                        "hello",
+                        "2026-05-26T10:00:00Z",
+                        Map.of()
+                ),
+                new StoredMemoryMessage(
+                        "assistant",
+                        "answer",
+                        "2026-05-26T10:00:03Z",
+                        Map.of(
+                                "tickers", List.of("AAPL"),
+                                "triggeredAgents", List.of("MARKET_DATA")
+                        )
+                )
+        ));
+
+        ChatSessionService.ChatSessionView session = chatSessionService.getSession("alice", "session-1");
+
+        assertThat(session.messages())
+                .extracting(ChatSessionMessage::content)
+                .containsExactly("hello", "answer");
+        assertThat(session.metadata().tickers()).containsExactly("AAPL");
+        assertThat(session.metadata().triggeredAgents()).containsExactly("MARKET_DATA");
+        verify(memoryRepository, times(1)).findStoredMessagesByConversationId("alice:session-1");
+    }
+
+    @Test
+    void sessionViewDoesNotRetryWorkingMemoryWhenStoredEventsAreUnavailable() {
+        when(memoryRepository.findStoredMessagesByConversationId("alice:session-1")).thenReturn(List.of());
+
+        ChatSessionService.ChatSessionView session = chatSessionService.getSession("alice", "session-1");
+
+        assertThat(session.messages()).isEmpty();
+        assertThat(session.metadata()).isEqualTo(ChatSessionMetadata.empty());
+        verify(memoryRepository, times(1)).findStoredMessagesByConversationId("alice:session-1");
+        verify(memoryRepository, never()).findMemoryMessagesByConversationId("alice:session-1");
+    }
+
+    @Test
+    void listSessionsReadsRedisIndexWhenAvailable() {
+        ChatSessionIndexService sessionIndexService = mock(ChatSessionIndexService.class);
+        ChatSessionService service = new ChatSessionService(chatMemory, memoryRepository, null, sessionIndexService);
+        when(sessionIndexService.listSessions("alice")).thenReturn(List.of("session-3", "session-2", "session-1"));
+
+        assertThat(service.listSessions("alice")).containsExactly("session-3", "session-2", "session-1");
+        verify(memoryRepository, never()).findConversationIds("alice");
+    }
+
+    @Test
+    void clearSessionRemovesRedisIndexMember() {
+        ChatSessionIndexService sessionIndexService = mock(ChatSessionIndexService.class);
+        ChatSessionService service = new ChatSessionService(chatMemory, memoryRepository, null, sessionIndexService);
+
+        service.clearSession("alice", "session-1");
+
+        verify(chatMemory).clear("alice:session-1");
+        verify(sessionIndexService).removeSession("alice", "session-1");
     }
 
     @Test

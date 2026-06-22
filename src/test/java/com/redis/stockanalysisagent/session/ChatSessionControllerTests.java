@@ -16,6 +16,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -127,7 +128,7 @@ class ChatSessionControllerTests {
     }
 
     @Test
-    void sessionsEndpointCachesListInHttpSession() {
+    void sessionsEndpointReadsSessionIndex() {
         MockHttpServletRequest request = new MockHttpServletRequest();
         controller.login(new LoginRequest("alice", 7, null, null, null), request);
         when(chatSessionService.listSessions("alice")).thenReturn(List.of("session-2", "session-1"));
@@ -139,7 +140,8 @@ class ChatSessionControllerTests {
         assertThat(firstResponse.sessions()).containsExactly("session-2", "session-1");
         assertThat(secondResponse).isNotNull();
         assertThat(secondResponse.sessions()).containsExactly("session-2", "session-1");
-        verify(chatSessionService, times(1)).listSessions("alice");
+        verify(chatSessionService, times(2)).listSessions("alice");
+        verify(chatSessionService, never()).summarizeSessions("alice", List.of("session-2", "session-1"));
     }
 
     @Test
@@ -162,21 +164,27 @@ class ChatSessionControllerTests {
     void sessionEndpointReturnsSessionMetadata() {
         MockHttpServletRequest request = new MockHttpServletRequest();
         controller.login(new LoginRequest("alice", 7, null, null, null), request);
-        when(chatSessionService.sessionMetadata("alice", "session-1"))
-                .thenReturn(new ChatSessionMetadata(List.of("AAPL"), List.of("MARKET_DATA")));
+        when(chatSessionService.getSession("alice", "session-1"))
+                .thenReturn(new ChatSessionService.ChatSessionView(
+                        List.of(),
+                        new ChatSessionMetadata(List.of("AAPL"), List.of("MARKET_DATA"))
+                ));
 
         ChatSessionResponse response = controller.session("session-1", request).getBody();
 
         assertThat(response).isNotNull();
         assertThat(response.metadata().tickers()).containsExactly("AAPL");
         assertThat(response.metadata().triggeredAgents()).containsExactly("MARKET_DATA");
+        verify(chatSessionService).getSession("alice", "session-1");
     }
 
     @Test
-    void clearSessionRemovesSessionFromCachedList() {
+    void clearSessionRemovesSessionFromIndex() {
         MockHttpServletRequest request = new MockHttpServletRequest();
         controller.login(new LoginRequest("alice", 7, null, null, null), request);
-        when(chatSessionService.listSessions("alice")).thenReturn(List.of("session-2", "session-1"));
+        when(chatSessionService.listSessions("alice"))
+                .thenReturn(List.of("session-2", "session-1"))
+                .thenReturn(List.of("session-1"));
 
         controller.sessions(request, false);
         controller.clearSession("session-2", request);
@@ -185,7 +193,7 @@ class ChatSessionControllerTests {
         assertThat(response).isNotNull();
         assertThat(response.sessions()).containsExactly("session-1");
         verify(chatSessionService).clearSession("alice", "session-2");
-        verify(chatSessionService, times(1)).listSessions("alice");
+        verify(chatSessionService, times(2)).listSessions("alice");
     }
 
     @Test

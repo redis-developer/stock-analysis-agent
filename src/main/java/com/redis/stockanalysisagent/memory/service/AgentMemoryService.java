@@ -347,12 +347,17 @@ public class AgentMemoryService {
     }
 
     private SessionMemory fetchSessionMemory(String sessionId) {
-        return callAgentMemory(() ->
-                client.get()
+        return callAgentMemory(() -> {
+            try {
+                return client.get()
                         .uri("/v1/stores/{storeId}/session-memory/{sessionId}", storeId, sessionId)
                         .retrieve()
                         .bodyToMono(SessionMemory.class)
-                        .block());
+                        .block();
+            } catch (WebClientResponseException.NotFound ignored) {
+                return null;
+            }
+        });
     }
 
     private LongTermMemoryFilter longTermMemoryOwnerFilter(String userId) {

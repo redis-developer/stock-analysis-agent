@@ -37,21 +37,23 @@ public class ChatSessionService {
     private final ChatMemory chatMemory;
     private final AmsChatMemoryRepository memoryRepository;
     private final WorkflowService workflowService;
+    private final ChatSessionIndexService sessionIndexService;
 
     public ChatSessionService(
             ChatMemory chatMemory,
             AmsChatMemoryRepository memoryRepository
     ) {
-        this(chatMemory, memoryRepository, (WorkflowService) null);
+        this(chatMemory, memoryRepository, (WorkflowService) null, null);
     }
 
     @Autowired
     public ChatSessionService(
             ChatMemory chatMemory,
             AmsChatMemoryRepository memoryRepository,
-            ObjectProvider<WorkflowService> workflowService
+            ObjectProvider<WorkflowService> workflowService,
+            ObjectProvider<ChatSessionIndexService> sessionIndexService
     ) {
-        this(chatMemory, memoryRepository, workflowService.getIfAvailable());
+        this(chatMemory, memoryRepository, workflowService.getIfAvailable(), sessionIndexService.getIfAvailable());
     }
 
     ChatSessionService(
@@ -59,9 +61,19 @@ public class ChatSessionService {
             AmsChatMemoryRepository memoryRepository,
             WorkflowService workflowService
     ) {
+        this(chatMemory, memoryRepository, workflowService, null);
+    }
+
+    ChatSessionService(
+            ChatMemory chatMemory,
+            AmsChatMemoryRepository memoryRepository,
+            WorkflowService workflowService,
+            ChatSessionIndexService sessionIndexService
+    ) {
         this.chatMemory = chatMemory;
         this.memoryRepository = memoryRepository;
         this.workflowService = workflowService;
+        this.sessionIndexService = sessionIndexService;
     }
 
     public void clearSession(String userId, String sessionId) {
@@ -70,9 +82,16 @@ public class ChatSessionService {
             chatMemory.clear(conversationId);
         } catch (RuntimeException ignored) {
         }
+        if (sessionIndexService != null) {
+            sessionIndexService.removeSession(userId, sessionId);
+        }
     }
 
     public List<String> listSessions(String userId) {
+        if (sessionIndexService != null) {
+            return sessionIndexService.listSessions(userId);
+        }
+
         return memoryRepository.findConversationIds(userId).stream()
                 .filter(sessionId -> sessionId != null && !sessionId.isBlank())
                 .distinct()
@@ -95,11 +114,31 @@ public class ChatSessionService {
     public List<ChatSessionMessage> getSessionMessages(String userId, String sessionId) {
         String conversationId = conversationId(userId, sessionId);
         List<StoredMemoryMessage> storedMessages = storedMessages(conversationId);
+        return sessionMessages(conversationId, storedMessages, true);
+    }
+
+    public ChatSessionView getSession(String userId, String sessionId) {
+        String conversationId = conversationId(userId, sessionId);
+        List<StoredMemoryMessage> storedMessages = storedMessages(conversationId);
+        return new ChatSessionView(
+                sessionMessages(conversationId, storedMessages, false),
+                sessionMetadata(storedMessages, latestWorkflowState(sessionId))
+        );
+    }
+
+    private List<ChatSessionMessage> sessionMessages(
+            String conversationId,
+            List<StoredMemoryMessage> storedMessages,
+            boolean allowLegacyFallback
+    ) {
         if (storedMessages != null && !storedMessages.isEmpty()) {
             return storedMessages.stream()
                     .map(this::toSessionMessage)
                     .filter(message -> message != null && !message.content().isBlank())
                     .toList();
+        }
+        if (!allowLegacyFallback) {
+            return List.of();
         }
 
         return memoryRepository.findMemoryMessagesByConversationId(conversationId).stream()
@@ -409,6 +448,16 @@ public class ChatSessionService {
             return null;
         }
         return value.trim();
+    }
+
+    public record ChatSessionView(
+            List<ChatSessionMessage> messages,
+            ChatSessionMetadata metadata
+    ) {
+        public ChatSessionView {
+            messages = messages == null ? List.of() : List.copyOf(messages);
+            metadata = metadata == null ? ChatSessionMetadata.empty() : metadata;
+        }
     }
 
     private record WorkflowState(

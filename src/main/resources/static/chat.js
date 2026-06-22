@@ -1681,7 +1681,20 @@
         if (state.sessionRefreshInFlight) {
             return false;
         }
-        return Boolean(normalizeSessionValue(state.sessionId));
+        const activeSessionId = normalizeSessionValue(state.sessionId);
+        return Boolean(activeSessionId && shouldPollSession(activeSessionId));
+    }
+
+    function shouldPollSession(sessionId) {
+        const targetSessionId = normalizeSessionValue(sessionId);
+        if (!targetSessionId) {
+            return false;
+        }
+        if (isSessionPending(targetSessionId)) {
+            return true;
+        }
+        const workflow = state.sessionWorkflowBySession[targetSessionId] || null;
+        return Boolean(workflow && isWorkflowActive(workflow.status));
     }
 
     function messageListSignature(messages) {

@@ -4,7 +4,6 @@ import com.redis.stockanalysisagent.agent.TokenUsageSummary;
 import com.redis.stockanalysisagent.session.ChatSessionAccess;
 import com.redis.stockanalysisagent.session.controller.ChatSessionController;
 import com.redis.stockanalysisagent.session.ChatSessionService;
-import com.redis.stockanalysisagent.session.controller.vo.ChatSessionsResponse;
 import com.redis.stockanalysisagent.session.controller.vo.LoginRequest;
 import com.redis.stockanalysisagent.workflow.WorkflowEventService;
 import com.redis.stockanalysisagent.workflow.WorkflowStatus;
@@ -24,7 +23,6 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -104,23 +102,6 @@ class ChatControllerTests {
         assertThat(response.semanticCachingEnabled()).isFalse();
         assertThat(response.rateLimitingEnabled()).isFalse();
         verify(chatService).chat("alice", "session-1", "hello", null, 4, false, false);
-    }
-
-    @Test
-    void chatAddsSessionToCachedList() {
-        MockHttpServletRequest request = new MockHttpServletRequest();
-        sessionController.login(new LoginRequest("alice", 7, null, null, null), request);
-        when(chatSessionService.listSessions("alice")).thenReturn(List.of("session-1"));
-        when(chatService.chat(eq("alice"), eq("session-2"), eq("hello"), isNull(), eq(7), eq(true), eq(true)))
-                .thenReturn(chatTurn("alice:session-2"));
-
-        sessionController.sessions(request, false);
-        controller.chat(new ChatRequest("session-2", "hello", null, null, null, null, null), request);
-        ChatSessionsResponse response = sessionController.sessions(request, false).getBody();
-
-        assertThat(response).isNotNull();
-        assertThat(response.sessions()).containsExactly("session-2", "session-1");
-        verify(chatSessionService, times(1)).listSessions("alice");
     }
 
     @Test

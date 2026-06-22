@@ -179,7 +179,6 @@ public class ChatController {
                 prepared.semanticCachingEnabled()
         );
         long responseTimeMs = (System.nanoTime() - startedAt) / 1_000_000;
-        sessionAccess.cacheChatSession(prepared.session(), prepared.sessionId());
         log.info(
                 "chat_request_complete userId={} sessionId={} conversationId={} workflowId={} workflowStatus={} durationMs={}",
                 prepared.userId(),

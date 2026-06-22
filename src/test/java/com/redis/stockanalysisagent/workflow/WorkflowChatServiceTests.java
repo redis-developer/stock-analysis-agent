@@ -2,6 +2,7 @@ package com.redis.stockanalysisagent.chat;
 
 import com.redis.stockanalysisagent.cache.ExternalDataCache;
 import com.redis.stockanalysisagent.memory.AmsChatMemoryRepository;
+import com.redis.stockanalysisagent.session.ChatSessionIndexService;
 import com.redis.stockanalysisagent.session.dto.ChatSessionMetadata;
 import com.redis.stockanalysisagent.workflow.WorkflowContextHolder;
 import com.redis.stockanalysisagent.workflow.WorkflowMetadata;
@@ -32,12 +33,14 @@ class WorkflowChatServiceTests {
     private final ExternalDataCache externalDataCache = mock(ExternalDataCache.class);
     private final ChatProgressPublisher progressPublisher = mock(ChatProgressPublisher.class);
     private final WorkflowService workflowService = mock(WorkflowService.class);
+    private final ChatSessionIndexService sessionIndexService = mock(ChatSessionIndexService.class);
     private final ChatService chatService = new ChatService(
             memoryRepository,
             chatAnalysisService,
             externalDataCache,
             progressPublisher,
-            workflowService
+            workflowService,
+            sessionIndexService
     );
 
     @Test
@@ -68,6 +71,8 @@ class WorkflowChatServiceTests {
         assertThat(turn.executionSteps()).extracting(ChatExecutionStep::id)
                 .contains("WORKFLOW_START", "WORKFLOW_COMPLETE");
         assertThat(WorkflowContextHolder.workflowId()).isEmpty();
+        verify(sessionIndexService).recordSessionStarted("alice", "session-1");
+        verify(sessionIndexService).recordSessionCompleted("alice", "session-1");
         verify(workflowService).complete(running);
     }
 
@@ -208,6 +213,8 @@ class WorkflowChatServiceTests {
         assertThatThrownBy(() -> chatService.chat("alice", "session-1", "hello", "client-1", 4, true, true))
                 .isSameAs(failure);
 
+        verify(sessionIndexService).recordSessionStarted("alice", "session-1");
+        verify(sessionIndexService, never()).recordSessionCompleted("alice", "session-1");
         verify(workflowService).fail(running, failure);
         assertThat(WorkflowContextHolder.workflowId()).isEmpty();
     }
