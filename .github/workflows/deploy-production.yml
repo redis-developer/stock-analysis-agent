@@ -60,9 +60,6 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v3
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
       - name: Configure Docker
         run: gcloud auth configure-docker "${{ env.ARTIFACT_REGISTRY_HOST }}" --quiet
 
@@ -74,11 +71,12 @@ jobs:
 
       - name: Build and push image
         run: |
-          docker buildx build \
-            --platform linux/amd64 \
+          docker build \
             -t "${{ steps.image.outputs.repository }}:${{ steps.image.outputs.sha }}" \
             -t "${{ steps.image.outputs.repository }}:latest" \
-            --push .
+            .
+          docker push "${{ steps.image.outputs.repository }}:${{ steps.image.outputs.sha }}"
+          docker push "${{ steps.image.outputs.repository }}:latest"
 
       - name: Deploy
         run: |
