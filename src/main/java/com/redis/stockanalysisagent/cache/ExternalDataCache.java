@@ -141,25 +141,26 @@ public class ExternalDataCache {
         long startedAt = System.nanoTime();
         String id = dataAccessStepId(cacheName, key, ExternalDataAccess.SOURCE_API);
         String label = apiProgressLabel(cacheName);
-        progressPublisher.running(
-                id,
-                label,
-                ChatProgressPublisher.KIND_SYSTEM,
-                "Fetching " + dataProgressName(cacheName, key) + "."
-        );
         try {
             T loaded = loadWithProviderControls(cacheName, key, () -> {
+                progressPublisher.running(
+                        id,
+                        label,
+                        ChatProgressPublisher.KIND_SYSTEM,
+                        "Fetching " + dataProgressName(cacheName, key) + "."
+                );
                 apiUsageService.recordHitForCacheName(cacheName);
                 sleepIfLatencySimulationEnabled(cacheName);
-                return loader.get();
+                T result = loader.get();
+                progressPublisher.completed(
+                        id,
+                        label,
+                        ChatProgressPublisher.KIND_SYSTEM,
+                        elapsedDurationMs(startedAt),
+                        "Fetched " + dataProgressName(cacheName, key) + "."
+                );
+                return result;
             });
-            progressPublisher.completed(
-                    id,
-                    label,
-                    ChatProgressPublisher.KIND_SYSTEM,
-                    elapsedDurationMs(startedAt),
-                    "Fetched " + dataProgressName(cacheName, key) + "."
-            );
             return loaded;
         } catch (CircuitBreakerOpenException ex) {
             progressPublisher.failed(
@@ -171,13 +172,6 @@ public class ExternalDataCache {
             );
             throw ex;
         } catch (ProviderCapacityTimeoutException ex) {
-            progressPublisher.failed(
-                    id,
-                    "Provider capacity",
-                    ChatProgressPublisher.KIND_SYSTEM,
-                    elapsedDurationMs(startedAt),
-                    "Timed out waiting for " + providerLabel(ex.providerId()) + " capacity."
-            );
             throw ex;
         } catch (RuntimeException ex) {
             progressPublisher.failed(
@@ -201,22 +195,23 @@ public class ExternalDataCache {
             return loadWithCircuitBreaker(providerId, loader);
         }
 
-        String label = "Provider capacity";
+        String label = "Waiting for " + providerLabel(providerId) + " capacity";
         String stepId = capacityStepId(providerId, cacheName, key);
         long startedAt = System.nanoTime();
         progressPublisher.running(
                 stepId,
                 label,
                 ChatProgressPublisher.KIND_SYSTEM,
-                "Waiting for " + providerLabel(providerId) + " capacity."
+                "Waiting for a Redis semaphore permit before calling " + providerLabel(providerId) + "."
         );
         try (ProviderCapacityService.Permit permit = providerCapacityService.acquire(providerId)) {
+            long waitedMs = elapsedDurationMs(startedAt);
             progressPublisher.completed(
                     stepId,
-                    label,
+                    providerLabel(providerId) + " permit acquired",
                     ChatProgressPublisher.KIND_SYSTEM,
-                    elapsedDurationMs(startedAt),
-                    "Acquired " + providerLabel(providerId) + " permit (" + permit.activeCount() + "/" + permit.limit() + " active)."
+                    waitedMs,
+                    capacityAcquiredSummary(providerId, permit, waitedMs)
             );
             return loadWithCircuitBreaker(providerId, loader);
         } catch (ProviderCapacityTimeoutException ex) {
@@ -229,6 +224,22 @@ public class ExternalDataCache {
             );
             throw ex;
         }
+    }
+
+    private String capacityAcquiredSummary(String providerId, ProviderCapacityService.Permit permit, long waitedMs) {
+        String wait = waitedMs < 100 ? "immediately" : "after " + durationText(waitedMs);
+        return "Acquired " + providerLabel(providerId) + " permit " + wait
+                + " (" + permit.activeCount() + "/" + permit.limit() + " active).";
+    }
+
+    private String durationText(long durationMs) {
+        if (durationMs >= 1_000 && durationMs % 1_000 == 0) {
+            return (durationMs / 1_000) + "s";
+        }
+        if (durationMs >= 1_000) {
+            return (durationMs / 1_000) + "." + ((durationMs % 1_000) / 100) + "s";
+        }
+        return durationMs + "ms";
     }
 
     private <T> T loadWithCircuitBreaker(String providerId, Supplier<T> loader) {
@@ -261,19 +272,11 @@ public class ExternalDataCache {
     }
 
     private String dataAccessStepId(String cacheName, String key, String source) {
-        return "DATA:%s:%s:%s".formatted(
-                source,
-                safeIdPart(cacheName),
-                safeIdPart(key)
-        );
+        return "DATA:%s:%s".formatted(source, safeIdPart(providerId(cacheName)));
     }
 
     private String capacityStepId(String providerId, String cacheName, String key) {
-        return "CAPACITY:%s:%s:%s".formatted(
-                safeIdPart(providerId),
-                safeIdPart(cacheName),
-                safeIdPart(key)
-        );
+        return "CAPACITY:%s".formatted(safeIdPart(providerId));
     }
 
     private String safeIdPart(String value) {

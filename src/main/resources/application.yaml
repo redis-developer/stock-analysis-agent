@@ -62,7 +62,7 @@ stock-analysis:
     retry-interval: ${STOCK_ANALYSIS_PROVIDER_CAPACITY_RETRY_INTERVAL:100ms}
     state-ttl: ${STOCK_ANALYSIS_PROVIDER_CAPACITY_STATE_TTL:7d}
   provider-latency-simulation:
-    default-delay: ${STOCK_ANALYSIS_PROVIDER_SIMULATED_DELAY:8s}
+    default-delay: ${STOCK_ANALYSIS_PROVIDER_SIMULATED_DELAY:20s}
   market-data:
     provider: twelve-data
     twelve-data:

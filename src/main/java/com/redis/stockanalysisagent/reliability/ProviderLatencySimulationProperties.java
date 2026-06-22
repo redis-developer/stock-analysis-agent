@@ -9,13 +9,13 @@ import java.time.Duration;
 @ConfigurationProperties(prefix = "stock-analysis.provider-latency-simulation")
 public class ProviderLatencySimulationProperties {
 
-    private Duration defaultDelay = Duration.ofSeconds(8);
+    private Duration defaultDelay = Duration.ofSeconds(20);
 
     public Duration getDefaultDelay() {
         return defaultDelay;
     }
 
     public void setDefaultDelay(Duration defaultDelay) {
-        this.defaultDelay = defaultDelay != null ? defaultDelay : Duration.ofSeconds(8);
+        this.defaultDelay = defaultDelay != null ? defaultDelay : Duration.ofSeconds(20);
     }
 }
