@@ -3,6 +3,9 @@ package com.redis.stockanalysisagent.cache;
 import com.redis.stockanalysisagent.chat.ChatProgressPublisher;
 import com.redis.stockanalysisagent.reliability.CircuitBreakerOpenException;
 import com.redis.stockanalysisagent.reliability.CircuitBreakerService;
+import com.redis.stockanalysisagent.reliability.ProviderCapacityService;
+import com.redis.stockanalysisagent.reliability.ProviderCapacityTimeoutException;
+import com.redis.stockanalysisagent.reliability.ProviderLatencySimulationService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
@@ -21,6 +24,8 @@ public class ExternalDataCache {
     private final ChatProgressPublisher progressPublisher;
     private final ExternalApiUsageService apiUsageService;
     private final CircuitBreakerService circuitBreakerService;
+    private final ProviderCapacityService providerCapacityService;
+    private final ProviderLatencySimulationService latencySimulationService;
     private final ConcurrentMap<String, Object> locks = new ConcurrentHashMap<>();
     private final ThreadLocal<List<ExternalDataAccess>> recordedAccesses = ThreadLocal.withInitial(ArrayList::new);
     private final ThreadLocal<Boolean> cachingEnabled = ThreadLocal.withInitial(() -> true);
@@ -30,12 +35,16 @@ public class ExternalDataCache {
             CacheManager cacheManager,
             ChatProgressPublisher progressPublisher,
             ExternalApiUsageService apiUsageService,
-            CircuitBreakerService circuitBreakerService
+            CircuitBreakerService circuitBreakerService,
+            ProviderCapacityService providerCapacityService,
+            ProviderLatencySimulationService latencySimulationService
     ) {
         this.cacheManager = cacheManager;
         this.progressPublisher = progressPublisher;
         this.apiUsageService = apiUsageService;
         this.circuitBreakerService = circuitBreakerService;
+        this.providerCapacityService = providerCapacityService;
+        this.latencySimulationService = latencySimulationService;
     }
 
     ExternalDataCache(
@@ -47,6 +56,8 @@ public class ExternalDataCache {
         this.progressPublisher = progressPublisher;
         this.apiUsageService = apiUsageService;
         this.circuitBreakerService = null;
+        this.providerCapacityService = null;
+        this.latencySimulationService = null;
     }
 
     @SuppressWarnings("unchecked")
@@ -137,8 +148,9 @@ public class ExternalDataCache {
                 "Fetching " + dataProgressName(cacheName, key) + "."
         );
         try {
-            T loaded = loadWithCircuitBreaker(cacheName, () -> {
+            T loaded = loadWithProviderControls(cacheName, key, () -> {
                 apiUsageService.recordHitForCacheName(cacheName);
+                sleepIfLatencySimulationEnabled(cacheName);
                 return loader.get();
             });
             progressPublisher.completed(
@@ -158,6 +170,15 @@ public class ExternalDataCache {
                     "Blocked " + providerLabel(ex.providerId()) + " call because provider state is " + ex.state().state() + "."
             );
             throw ex;
+        } catch (ProviderCapacityTimeoutException ex) {
+            progressPublisher.failed(
+                    id,
+                    "Provider capacity",
+                    ChatProgressPublisher.KIND_SYSTEM,
+                    elapsedDurationMs(startedAt),
+                    "Timed out waiting for " + providerLabel(ex.providerId()) + " capacity."
+            );
+            throw ex;
         } catch (RuntimeException ex) {
             progressPublisher.failed(
                     id,
@@ -170,17 +191,62 @@ public class ExternalDataCache {
         }
     }
 
-    private <T> T loadWithCircuitBreaker(String cacheName, Supplier<T> loader) {
-        if (circuitBreakerService == null) {
-            return loader.get();
-        }
-
+    private <T> T loadWithProviderControls(String cacheName, String key, Supplier<T> loader) {
         String providerId = providerId(cacheName);
         if (providerId == null) {
             return loader.get();
         }
 
+        if (providerCapacityService == null || !providerCapacityService.enabled()) {
+            return loadWithCircuitBreaker(providerId, loader);
+        }
+
+        String label = "Provider capacity";
+        String stepId = capacityStepId(providerId, cacheName, key);
+        long startedAt = System.nanoTime();
+        progressPublisher.running(
+                stepId,
+                label,
+                ChatProgressPublisher.KIND_SYSTEM,
+                "Waiting for " + providerLabel(providerId) + " capacity."
+        );
+        try (ProviderCapacityService.Permit permit = providerCapacityService.acquire(providerId)) {
+            progressPublisher.completed(
+                    stepId,
+                    label,
+                    ChatProgressPublisher.KIND_SYSTEM,
+                    elapsedDurationMs(startedAt),
+                    "Acquired " + providerLabel(providerId) + " permit (" + permit.activeCount() + "/" + permit.limit() + " active)."
+            );
+            return loadWithCircuitBreaker(providerId, loader);
+        } catch (ProviderCapacityTimeoutException ex) {
+            progressPublisher.failed(
+                    stepId,
+                    label,
+                    ChatProgressPublisher.KIND_SYSTEM,
+                    elapsedDurationMs(startedAt),
+                    "Timed out waiting for " + providerLabel(providerId) + " capacity."
+            );
+            throw ex;
+        }
+    }
+
+    private <T> T loadWithCircuitBreaker(String providerId, Supplier<T> loader) {
+        if (circuitBreakerService == null) {
+            return loader.get();
+        }
+
         return circuitBreakerService.call(providerId, loader);
+    }
+
+    private void sleepIfLatencySimulationEnabled(String cacheName) {
+        if (latencySimulationService == null) {
+            return;
+        }
+        String providerId = providerId(cacheName);
+        if (providerId != null) {
+            latencySimulationService.sleepIfConfigured(providerId);
+        }
     }
 
     private void recordCacheHitProgress(String cacheName, String key, long startedAt) {
@@ -197,6 +263,14 @@ public class ExternalDataCache {
     private String dataAccessStepId(String cacheName, String key, String source) {
         return "DATA:%s:%s:%s".formatted(
                 source,
+                safeIdPart(cacheName),
+                safeIdPart(key)
+        );
+    }
+
+    private String capacityStepId(String providerId, String cacheName, String key) {
+        return "CAPACITY:%s:%s:%s".formatted(
+                safeIdPart(providerId),
                 safeIdPart(cacheName),
                 safeIdPart(key)
         );

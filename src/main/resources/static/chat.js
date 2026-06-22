@@ -445,6 +445,12 @@
     }
 
     async function onCircuitBreakerListClick(event) {
+        const latencyButton = event.target.closest("[data-latency-provider]");
+        if (latencyButton) {
+            await onLatencySimulationClick(latencyButton);
+            return;
+        }
+
         const button = event.target.closest("[data-circuit-provider]");
         if (!button) {
             return;
@@ -465,6 +471,27 @@
             setStatus(enabled ? "Failure simulation on" : "Failure simulation off");
         } catch (error) {
             setStatus("Simulator update failed", "error");
+        } finally {
+            button.disabled = false;
+        }
+    }
+
+    async function onLatencySimulationClick(button) {
+        const providerId = normalizeProviderId(button.dataset.latencyProvider);
+        if (!providerId) {
+            return;
+        }
+
+        const current = circuitBreakerByProvider(providerId);
+        const enabled = !(current && normalizeCount(current.latencySimulationMs) > 0);
+        button.disabled = true;
+        try {
+            const updated = await updateLatencySimulation(providerId, enabled);
+            mergeCircuitBreakerStatus(updated);
+            renderCircuitBreakers();
+            setStatus(enabled ? "Provider delay on" : "Provider delay off");
+        } catch (error) {
+            setStatus("Provider delay update failed", "error");
         } finally {
             button.disabled = false;
         }
@@ -1118,6 +1145,31 @@
     async function updateFailureSimulation(providerId, enabled) {
         const response = await fetch(new URL(
             "./api/circuit-breakers/" + encodeURIComponent(providerId) + "/simulation",
+            window.location.href
+        ), {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ enabled: Boolean(enabled) })
+        });
+        const contentType = response.headers.get("content-type") || "";
+        const rawBody = await response.text();
+        const body = contentType.includes("application/json") ? safeParseJson(rawBody) : null;
+
+        if (!response.ok) {
+            if (handleUnauthorizedResponse(response)) {
+                throw new Error("Login is required.");
+            }
+            throw new Error(extractErrorMessage(body, rawBody, response.status));
+        }
+
+        return body || {};
+    }
+
+    async function updateLatencySimulation(providerId, enabled) {
+        const response = await fetch(new URL(
+            "./api/circuit-breakers/" + encodeURIComponent(providerId) + "/latency",
             window.location.href
         ), {
             method: "POST",
@@ -2080,12 +2132,14 @@
     function buildCircuitBreakerRow(status) {
         const providerId = normalizeProviderId(status.providerId);
         const breaker = status.circuitBreaker || {};
+        const capacity = status.capacity || {};
         const stateName = normalizeCircuitState(breaker.state);
         const row = document.createElement("div");
         row.className = "circuit-provider";
         row.classList.toggle("is-open", stateName === "OPEN");
         row.classList.toggle("is-half-open", stateName === "HALF_OPEN");
         row.classList.toggle("is-simulated", Boolean(status.failureSimulationEnabled));
+        row.classList.toggle("is-slow", normalizeCount(status.latencySimulationMs) > 0);
         row.setAttribute("role", "listitem");
 
         const header = document.createElement("div");
@@ -2106,6 +2160,9 @@
         meta.className = "circuit-provider__meta";
         meta.appendChild(circuitMetaItem("Failures", String(normalizeCount(breaker.failureCount))));
         meta.appendChild(circuitMetaItem("Blocked", String(normalizeCount(breaker.blockedCallCount))));
+        meta.appendChild(circuitMetaItem("Active", formatCapacityActive(capacity)));
+        meta.appendChild(circuitMetaItem("Waiting", String(normalizeCount(capacity.waitingCount))));
+        meta.appendChild(circuitMetaItem("Timeouts", String(normalizeCount(capacity.timeoutCount))));
         const openUntil = formatTimestamp(breaker.openUntil);
         if (openUntil) {
             meta.appendChild(circuitMetaItem("Retry", openUntil));
@@ -2128,6 +2185,24 @@
         }
         toggle.title = (status.failureSimulationEnabled ? "Disable" : "Enable") + " simulated outage for " + (status.label || providerId);
         row.appendChild(toggle);
+
+        const latencyToggle = document.createElement("button");
+        latencyToggle.className = "identity-toggle circuit-provider__toggle circuit-provider__toggle--slow";
+        latencyToggle.type = "button";
+        latencyToggle.dataset.latencyProvider = providerId;
+        const latencyEnabled = normalizeCount(status.latencySimulationMs) > 0;
+        latencyToggle.setAttribute("aria-pressed", String(latencyEnabled));
+        latencyToggle.classList.toggle("is-off", !latencyEnabled);
+        latencyToggle.innerHTML = ""
+            + "<span class=\"identity-toggle__text\">Slow</span>"
+            + "<span class=\"identity-toggle__state\"></span>"
+            + "<span class=\"identity-toggle__switch\" aria-hidden=\"true\"><span class=\"identity-toggle__knob\"></span></span>";
+        const latencyState = latencyToggle.querySelector(".identity-toggle__state");
+        if (latencyState) {
+            latencyState.textContent = latencyEnabled ? formatDurationMs(status.latencySimulationMs) : "Off";
+        }
+        latencyToggle.title = (latencyEnabled ? "Disable" : "Enable") + " simulated latency for " + (status.label || providerId);
+        row.appendChild(latencyToggle);
 
         return row;
     }
@@ -2608,12 +2683,21 @@
                 providerId: provider.providerId,
                 label: provider.label,
                 failureSimulationEnabled: false,
+                latencySimulationMs: 0,
                 circuitBreaker: {
                     providerId: provider.providerId,
                     state: "CLOSED",
                     failureCount: 0,
                     blockedCallCount: 0,
                     callsAllowed: true
+                },
+                capacity: {
+                    providerId: provider.providerId,
+                    limit: 2,
+                    activeCount: 0,
+                    waitingCount: 0,
+                    timeoutCount: 0,
+                    capacityAvailable: true
                 }
             };
         });
@@ -2653,6 +2737,7 @@
                 ? status.label.trim()
                 : formatProviderLabel(providerId),
             failureSimulationEnabled: Boolean(status.failureSimulationEnabled),
+            latencySimulationMs: normalizeCount(status.latencySimulationMs),
             circuitBreaker: {
                 providerId,
                 state: normalizeCircuitState(breaker.state),
@@ -2665,8 +2750,35 @@
                 lastSuccessAt: breaker.lastSuccessAt || null,
                 reason: typeof breaker.reason === "string" ? breaker.reason : "",
                 callsAllowed: breaker.callsAllowed !== false
-            }
+            },
+            capacity: normalizeProviderCapacity(providerId, status.capacity)
         };
+    }
+
+    function normalizeProviderCapacity(providerId, capacity) {
+        const raw = capacity && typeof capacity === "object" ? capacity : {};
+        const limit = normalizePositiveCount(raw.limit, 2);
+        const activeCount = normalizeCount(raw.activeCount);
+        return {
+            providerId,
+            limit,
+            activeCount,
+            waitingCount: normalizeCount(raw.waitingCount),
+            timeoutCount: normalizeCount(raw.timeoutCount),
+            capacityAvailable: raw.capacityAvailable !== false && activeCount < limit
+        };
+    }
+
+    function formatCapacityActive(capacity) {
+        return normalizeCount(capacity && capacity.activeCount) + "/" + normalizePositiveCount(capacity && capacity.limit, 2);
+    }
+
+    function formatDurationMs(value) {
+        const ms = normalizeCount(value);
+        if (ms >= 1000 && ms % 1000 === 0) {
+            return (ms / 1000) + "s";
+        }
+        return ms + "ms";
     }
 
     function mergeCircuitBreakerStatus(status) {
@@ -2711,6 +2823,11 @@
     function normalizeCount(value) {
         const parsed = Number.parseInt(String(value), 10);
         return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+    }
+
+    function normalizePositiveCount(value, fallback) {
+        const parsed = Number.parseInt(String(value), 10);
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
     }
 
     function formatCircuitState(value) {

@@ -23,21 +23,31 @@ public class CircuitBreakerController {
     );
 
     private final CircuitBreakerService circuitBreakerService;
+    private final ProviderCapacityService providerCapacityService;
     private final ProviderFailureSimulationService failureSimulationService;
+    private final ProviderLatencySimulationService latencySimulationService;
+    private final ProviderLatencySimulationProperties latencySimulationProperties;
 
     public CircuitBreakerController(
             CircuitBreakerService circuitBreakerService,
-            ProviderFailureSimulationService failureSimulationService
+            ProviderCapacityService providerCapacityService,
+            ProviderFailureSimulationService failureSimulationService,
+            ProviderLatencySimulationService latencySimulationService,
+            ProviderLatencySimulationProperties latencySimulationProperties
     ) {
         this.circuitBreakerService = circuitBreakerService;
+        this.providerCapacityService = providerCapacityService;
         this.failureSimulationService = failureSimulationService;
+        this.latencySimulationService = latencySimulationService;
+        this.latencySimulationProperties = latencySimulationProperties;
     }
 
     @GetMapping
     public List<CircuitBreakerProviderStatus> statuses() {
         Map<Object, Object> simulations = failureSimulationService.states();
+        Map<Object, Object> latencySimulations = latencySimulationService.states();
         return PROVIDERS.stream()
-                .map(provider -> status(provider, simulations))
+                .map(provider -> status(provider, simulations, latencySimulations))
                 .toList();
     }
 
@@ -66,10 +76,27 @@ public class CircuitBreakerController {
     ) {
         ProviderDescriptor provider = provider(providerId);
         failureSimulationService.setEnabled(provider.providerId(), request != null && request.enabled());
-        return status(provider, failureSimulationService.states());
+        return status(provider, failureSimulationService.states(), latencySimulationService.states());
     }
 
-    private CircuitBreakerProviderStatus status(ProviderDescriptor provider, Map<Object, Object> simulations) {
+    @PostMapping("/{providerId}/latency")
+    public CircuitBreakerProviderStatus latency(
+            @PathVariable String providerId,
+            @RequestBody CircuitBreakerLatencySimulationRequest request
+    ) {
+        ProviderDescriptor provider = provider(providerId);
+        latencySimulationService.setDelay(
+                provider.providerId(),
+                request != null && request.enabled() ? latencySimulationProperties.getDefaultDelay() : null
+        );
+        return status(provider, failureSimulationService.states(), latencySimulationService.states());
+    }
+
+    private CircuitBreakerProviderStatus status(
+            ProviderDescriptor provider,
+            Map<Object, Object> simulations,
+            Map<Object, Object> latencySimulations
+    ) {
         boolean simulationEnabled = "true".equalsIgnoreCase(
                 String.valueOf(simulations.getOrDefault(provider.providerId(), "false"))
         );
@@ -77,8 +104,21 @@ public class CircuitBreakerController {
                 provider.providerId(),
                 provider.label(),
                 circuitBreakerService.state(provider.providerId()),
+                providerCapacityService.state(provider.providerId()),
+                latencySimulationMs(latencySimulations.get(provider.providerId())),
                 simulationEnabled
         );
+    }
+
+    private long latencySimulationMs(Object value) {
+        if (value == null) {
+            return 0;
+        }
+        try {
+            return Math.max(0, Long.parseLong(value.toString()));
+        } catch (NumberFormatException ignored) {
+            return 0;
+        }
     }
 
     private ProviderDescriptor provider(String providerId) {
@@ -93,6 +133,9 @@ public class CircuitBreakerController {
     }
 
     public record CircuitBreakerSimulationRequest(boolean enabled) {
+    }
+
+    public record CircuitBreakerLatencySimulationRequest(boolean enabled) {
     }
 
     private record ProviderDescriptor(String providerId, String label) {

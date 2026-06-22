@@ -54,6 +54,15 @@ stock-analysis:
     open-duration: ${STOCK_ANALYSIS_CIRCUIT_BREAKER_OPEN_DURATION:30s}
     probe-timeout: ${STOCK_ANALYSIS_CIRCUIT_BREAKER_PROBE_TIMEOUT:10s}
     state-ttl: ${STOCK_ANALYSIS_CIRCUIT_BREAKER_STATE_TTL:7d}
+  provider-capacity:
+    enabled: ${STOCK_ANALYSIS_PROVIDER_CAPACITY_ENABLED:true}
+    default-limit: ${STOCK_ANALYSIS_PROVIDER_CAPACITY_DEFAULT_LIMIT:2}
+    permit-ttl: ${STOCK_ANALYSIS_PROVIDER_CAPACITY_PERMIT_TTL:30s}
+    wait-timeout: ${STOCK_ANALYSIS_PROVIDER_CAPACITY_WAIT_TIMEOUT:5s}
+    retry-interval: ${STOCK_ANALYSIS_PROVIDER_CAPACITY_RETRY_INTERVAL:100ms}
+    state-ttl: ${STOCK_ANALYSIS_PROVIDER_CAPACITY_STATE_TTL:7d}
+  provider-latency-simulation:
+    default-delay: ${STOCK_ANALYSIS_PROVIDER_SIMULATED_DELAY:8s}
   market-data:
     provider: twelve-data
     twelve-data:

@@ -759,6 +759,15 @@ body::before {
     border-color: rgba(252, 165, 165, 0.55);
 }
 
+.circuit-provider.is-slow .circuit-provider__toggle--slow {
+    border-color: rgba(251, 191, 36, 0.58);
+    color: #facc15;
+}
+
+.circuit-provider.is-slow .circuit-provider__toggle--slow .identity-toggle__state {
+    color: #facc15;
+}
+
 .account-menu .btn {
     width: 100%;
 }
