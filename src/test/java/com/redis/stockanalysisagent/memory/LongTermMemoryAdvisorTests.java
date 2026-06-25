@@ -2,7 +2,7 @@ package com.redis.stockanalysisagent.memory;
 
 import com.redis.agentmemory.models.longtermemory.MemoryRecordResult;
 import com.redis.agentmemory.models.longtermemory.MemoryRecordResults;
-import com.redis.stockanalysisagent.chat.ChatProgressPublisher;
+import com.redis.stockanalysisagent.chat.WorkflowProgress;
 import com.redis.stockanalysisagent.memory.service.AgentMemoryService;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClientRequest;
@@ -30,7 +30,7 @@ class LongTermMemoryAdvisorTests {
     private final LongTermMemoryAdvisor advisor = new LongTermMemoryAdvisor(
             agentMemoryService,
             memoryRepository,
-            mock(ChatProgressPublisher.class),
+            mock(WorkflowProgress.class),
             10
     );
 

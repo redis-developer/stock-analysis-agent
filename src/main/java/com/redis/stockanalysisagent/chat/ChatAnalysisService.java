@@ -125,7 +125,7 @@ class ChatAnalysisService {
                 agentExecution.tokenUsage(),
                 agentExecution.loop(),
                 agentExecution.dataAccesses(),
-                ChatProgressPublisher.ACTOR_TYPE_SUB_AGENT,
+                WorkflowProgress.ACTOR_TYPE_SUB_AGENT,
                 agentActorName(agentExecution)
         );
     }
@@ -152,8 +152,8 @@ class ChatAnalysisService {
                     coordinationResult.tokenUsage(),
                     null,
                     List.of(),
-                    ChatProgressPublisher.ACTOR_TYPE_COORDINATOR,
-                    ChatProgressPublisher.ACTOR_COORDINATOR
+                    WorkflowProgress.ACTOR_TYPE_COORDINATOR,
+                    WorkflowProgress.ACTOR_COORDINATOR
             );
         }
 
@@ -166,8 +166,8 @@ class ChatAnalysisService {
                 coordinationResult.tokenUsage(),
                 null,
                 List.of(),
-                ChatProgressPublisher.ACTOR_TYPE_COORDINATOR,
-                ChatProgressPublisher.ACTOR_COORDINATOR
+                WorkflowProgress.ACTOR_TYPE_COORDINATOR,
+                WorkflowProgress.ACTOR_COORDINATOR
         );
     }
 

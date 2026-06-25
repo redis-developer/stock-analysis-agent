@@ -1,7 +1,7 @@
 package com.redis.stockanalysisagent.memory;
 
 import com.redis.agentmemory.models.longtermemory.MemoryRecordResults;
-import com.redis.stockanalysisagent.chat.ChatProgressPublisher;
+import com.redis.stockanalysisagent.chat.WorkflowProgress;
 import com.redis.stockanalysisagent.chat.ChatProgressMetadata;
 import com.redis.stockanalysisagent.memory.service.AgentMemoryService;
 import com.redis.stockanalysisagent.session.ChatSessionAccess;
@@ -26,18 +26,18 @@ public class LongTermMemoryAdvisor implements BaseAdvisor {
 
     private final AgentMemoryService agentMemoryService;
     private final AmsChatMemoryRepository memoryRepository;
-    private final ChatProgressPublisher progressPublisher;
+    private final WorkflowProgress workflowProgress;
     private final int maxMemories;
 
     public LongTermMemoryAdvisor(
             AgentMemoryService agentMemoryService,
             AmsChatMemoryRepository memoryRepository,
-            ChatProgressPublisher progressPublisher,
+            WorkflowProgress workflowProgress,
             int maxMemories
     ) {
         this.agentMemoryService = agentMemoryService;
         this.memoryRepository = memoryRepository;
-        this.progressPublisher = progressPublisher;
+        this.workflowProgress = workflowProgress;
         this.maxMemories = maxMemories;
     }
 
@@ -60,10 +60,10 @@ public class LongTermMemoryAdvisor implements BaseAdvisor {
         String userId = ConversationId.parse(conversationId).userId();
 
         if (userId == null || ANONYMOUS_USER.equals(userId)) {
-            progressPublisher.completed(
+            workflowProgress.completed(
                     "MEMORY_RETRIEVAL",
                     "Memory retrieval",
-                    ChatProgressPublisher.KIND_SYSTEM,
+                    WorkflowProgress.KIND_SYSTEM,
                     0,
                     "Skipped long term memory retrieval for an anonymous user."
             );
@@ -72,10 +72,10 @@ public class LongTermMemoryAdvisor implements BaseAdvisor {
 
         String userMessage = request.prompt().getUserMessage().getText();
         if (userMessage == null || userMessage.isBlank()) {
-            progressPublisher.completed(
+            workflowProgress.completed(
                     "MEMORY_RETRIEVAL",
                     "Memory retrieval",
-                    ChatProgressPublisher.KIND_SYSTEM,
+                    WorkflowProgress.KIND_SYSTEM,
                     0,
                     "Skipped long term memory retrieval because the request was empty."
             );
@@ -84,13 +84,13 @@ public class LongTermMemoryAdvisor implements BaseAdvisor {
 
         int maxMemories = resolveMaxMemories(request.context().get(MAX_RETRIEVED_MEMORIES));
         long retrievalStartedAt = System.nanoTime();
-        progressPublisher.running(
+        workflowProgress.running(
                 "MEMORY_RETRIEVAL",
                 "Memory retrieval",
-                ChatProgressPublisher.KIND_SYSTEM,
+                WorkflowProgress.KIND_SYSTEM,
                 "Searching long term memory.",
-                ChatProgressPublisher.ACTOR_TYPE_SYSTEM,
-                ChatProgressPublisher.ACTOR_SYSTEM,
+                WorkflowProgress.ACTOR_TYPE_SYSTEM,
+                WorkflowProgress.ACTOR_SYSTEM,
                 ChatProgressMetadata.input(userMessage)
         );
         List<String> memories = searchMemories(userMessage, userId, maxMemories);
@@ -98,14 +98,14 @@ public class LongTermMemoryAdvisor implements BaseAdvisor {
         memoryRepository.setLastMemoryRetrievalDurationMs(durationMs);
         memoryRepository.setLastRetrievedMemories(memories);
         String outputPayload = memoryOutputPayload(userMessage, memories);
-        progressPublisher.completed(
+        workflowProgress.completed(
                 "MEMORY_RETRIEVAL",
                 "Memory retrieval",
-                ChatProgressPublisher.KIND_SYSTEM,
+                WorkflowProgress.KIND_SYSTEM,
                 durationMs,
                 memoryProgressSummary(memories),
-                ChatProgressPublisher.ACTOR_TYPE_SYSTEM,
-                ChatProgressPublisher.ACTOR_SYSTEM,
+                WorkflowProgress.ACTOR_TYPE_SYSTEM,
+                WorkflowProgress.ACTOR_SYSTEM,
                 ChatProgressMetadata.payload(userMessage, outputPayload)
         );
 

@@ -1,6 +1,6 @@
 package com.redis.stockanalysisagent.agent.news;
 
-import com.redis.stockanalysisagent.chat.ChatProgressPublisher;
+import com.redis.stockanalysisagent.chat.WorkflowProgress;
 import com.redis.stockanalysisagent.instrumentation.ToolCallInstrumentation;
 import org.springframework.ai.chat.client.AdvisorParams;
 import org.springframework.ai.chat.client.ChatClient;
@@ -35,7 +35,7 @@ public class NewsAgentConfig {
         return ChatClient.builder(chatModel)
                 .defaultAdvisors(AdvisorParams.ENABLE_NATIVE_STRUCTURED_OUTPUT)
                 .defaultTools(toolCallInstrumentation.callbacks(
-                        ChatProgressPublisher.ACTOR_TYPE_SUB_AGENT,
+                        WorkflowProgress.ACTOR_TYPE_SUB_AGENT,
                         "news",
                         newsTools
                 ))

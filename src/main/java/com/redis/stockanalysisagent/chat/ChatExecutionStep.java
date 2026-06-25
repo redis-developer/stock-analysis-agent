@@ -47,13 +47,13 @@ public record ChatExecutionStep(
     }
 
     private static String defaultActorType(String kind) {
-        return ChatProgressPublisher.KIND_AGENT.equals(kind)
-                ? ChatProgressPublisher.KIND_AGENT
-                : ChatProgressPublisher.ACTOR_TYPE_SYSTEM;
+        return WorkflowProgress.KIND_AGENT.equals(kind)
+                ? WorkflowProgress.KIND_AGENT
+                : WorkflowProgress.ACTOR_TYPE_SYSTEM;
     }
 
     private static String defaultActorName(String kind) {
-        return ChatProgressPublisher.KIND_AGENT.equals(kind) ? "" : ChatProgressPublisher.ACTOR_SYSTEM;
+        return WorkflowProgress.KIND_AGENT.equals(kind) ? "" : WorkflowProgress.ACTOR_SYSTEM;
     }
 
     private static String clean(String value) {

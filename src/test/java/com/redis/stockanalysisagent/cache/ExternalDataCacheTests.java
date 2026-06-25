@@ -1,6 +1,6 @@
 package com.redis.stockanalysisagent.cache;
 
-import com.redis.stockanalysisagent.chat.ChatProgressPublisher;
+import com.redis.stockanalysisagent.chat.WorkflowProgress;
 import org.junit.jupiter.api.Test;
 import org.springframework.cache.concurrent.ConcurrentMapCacheManager;
 
@@ -17,7 +17,7 @@ class ExternalDataCacheTests {
         ExternalApiUsageService apiUsageService = mock(ExternalApiUsageService.class);
         ExternalDataCache externalDataCache = new ExternalDataCache(
                 new ConcurrentMapCacheManager("quotes"),
-                mock(ChatProgressPublisher.class),
+                mock(WorkflowProgress.class),
                 apiUsageService
         );
 
@@ -40,7 +40,7 @@ class ExternalDataCacheTests {
         ExternalApiUsageService apiUsageService = mock(ExternalApiUsageService.class);
         ExternalDataCache externalDataCache = new ExternalDataCache(
                 new ConcurrentMapCacheManager("quotes"),
-                mock(ChatProgressPublisher.class),
+                mock(WorkflowProgress.class),
                 apiUsageService
         );
         externalDataCache.getOrLoad("quotes", "AAPL", () -> "payload");
@@ -66,7 +66,7 @@ class ExternalDataCacheTests {
         ExternalApiUsageService apiUsageService = mock(ExternalApiUsageService.class);
         ExternalDataCache externalDataCache = new ExternalDataCache(
                 new ConcurrentMapCacheManager("quotes"),
-                mock(ChatProgressPublisher.class),
+                mock(WorkflowProgress.class),
                 apiUsageService
         );
         externalDataCache.getOrLoad("quotes", "AAPL", () -> "payload");

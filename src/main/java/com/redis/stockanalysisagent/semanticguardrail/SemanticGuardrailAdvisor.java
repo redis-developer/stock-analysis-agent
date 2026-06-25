@@ -1,6 +1,6 @@
 package com.redis.stockanalysisagent.semanticguardrail;
 
-import com.redis.stockanalysisagent.chat.ChatProgressPublisher;
+import com.redis.stockanalysisagent.chat.WorkflowProgress;
 import org.springframework.ai.chat.client.ChatClientRequest;
 import org.springframework.ai.chat.client.ChatClientResponse;
 import org.springframework.ai.chat.client.advisor.api.CallAdvisor;
@@ -24,14 +24,14 @@ public class SemanticGuardrailAdvisor implements CallAdvisor {
     private static final JsonStringEncoder JSON_STRING_ENCODER = JsonStringEncoder.getInstance();
 
     private final SemanticGuardrailService semanticGuardrailService;
-    private final ChatProgressPublisher progressPublisher;
+    private final WorkflowProgress workflowProgress;
 
     public SemanticGuardrailAdvisor(
             SemanticGuardrailService semanticGuardrailService,
-            ChatProgressPublisher progressPublisher
+            WorkflowProgress workflowProgress
     ) {
         this.semanticGuardrailService = semanticGuardrailService;
-        this.progressPublisher = progressPublisher;
+        this.workflowProgress = workflowProgress;
     }
 
     @Override
@@ -47,20 +47,20 @@ public class SemanticGuardrailAdvisor implements CallAdvisor {
     @Override
     public ChatClientResponse adviseCall(ChatClientRequest request, CallAdvisorChain chain) {
         long startedAt = System.nanoTime();
-        progressPublisher.running(
+        workflowProgress.running(
                 "SEMANTIC_GUARDRAIL",
                 "Semantic guardrail",
-                ChatProgressPublisher.KIND_SYSTEM,
+                WorkflowProgress.KIND_SYSTEM,
                 "Checking whether the request is in scope."
         );
         String userMessage = userMessage(request);
         var match = semanticGuardrailService.match(userMessage);
         long durationMs = elapsedDurationMs(startedAt);
         if (match.isEmpty()) {
-            progressPublisher.completed(
+            workflowProgress.completed(
                     "SEMANTIC_GUARDRAIL",
                     "Semantic guardrail",
-                    ChatProgressPublisher.KIND_SYSTEM,
+                    WorkflowProgress.KIND_SYSTEM,
                     durationMs,
                     "Allowed the request to continue."
             );
@@ -73,10 +73,10 @@ public class SemanticGuardrailAdvisor implements CallAdvisor {
         }
 
         String routeName = match.get().routeName();
-        progressPublisher.completed(
+        workflowProgress.completed(
                 "SEMANTIC_GUARDRAIL",
                 "Semantic guardrail",
-                ChatProgressPublisher.KIND_SYSTEM,
+                WorkflowProgress.KIND_SYSTEM,
                 durationMs,
                 "Blocked the request with the %s semantic guardrail.".formatted(formatGuardrailRoute(routeName))
         );

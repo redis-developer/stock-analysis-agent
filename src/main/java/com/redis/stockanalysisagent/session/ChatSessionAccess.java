@@ -1,7 +1,7 @@
 package com.redis.stockanalysisagent.session;
 
 import jakarta.servlet.http.HttpSession;
-import com.redis.stockanalysisagent.workflow.WorkflowApprovalService;
+import com.redis.stockanalysisagent.workflow.approval.WorkflowApprovalService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;

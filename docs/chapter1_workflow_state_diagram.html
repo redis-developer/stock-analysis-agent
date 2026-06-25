@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Chapter 1 Workflow State</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            --bg: #061a20;
+            --panel: #0d2730;
+            --panel-strong: #12323d;
+            --line: #89a2ad;
+            --text: #f5f7fb;
+            --muted: #b9c5cc;
+            --redis: #ff4438;
+            --yellow: #e7ff1e;
+            --green: #45d483;
+            --blue: #91bdff;
+            --amber: #ffcf66;
+            --danger: #ff6f7b;
+            font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: grid;
+            place-items: center;
+            background: #111827;
+            color: var(--text);
+        }
+
+        .slide {
+            width: 1280px;
+            height: 720px;
+            position: relative;
+            overflow: hidden;
+            background: var(--bg);
+            border: 1px solid rgba(255, 255, 255, 0.16);
+        }
+
+        .title {
+            position: absolute;
+            left: 62px;
+            top: 54px;
+            width: 510px;
+        }
+
+        .eyebrow {
+            color: var(--yellow);
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 21px;
+            font-weight: 800;
+            letter-spacing: 0.04em;
+            margin-bottom: 18px;
+        }
+
+        h1 {
+            margin: 0;
+            color: var(--text);
+            font-size: 58px;
+            line-height: 1.02;
+            font-weight: 520;
+            letter-spacing: 0;
+        }
+
+        .question {
+            position: absolute;
+            left: 62px;
+            top: 240px;
+            width: 470px;
+            color: var(--muted);
+            font-size: 26px;
+            line-height: 1.32;
+            font-weight: 650;
+        }
+
+        .question strong {
+            color: var(--yellow);
+            font-weight: 850;
+        }
+
+        .key {
+            position: absolute;
+            left: 62px;
+            bottom: 70px;
+            width: 470px;
+            padding: 22px 24px;
+            border: 2px solid rgba(231, 255, 30, 0.38);
+            background: rgba(13, 39, 48, 0.92);
+        }
+
+        .key-label {
+            color: var(--muted);
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 16px;
+            font-weight: 800;
+            margin-bottom: 12px;
+            text-transform: uppercase;
+        }
+
+        .key-name {
+            color: var(--yellow);
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 21px;
+            line-height: 1.35;
+            overflow-wrap: anywhere;
+        }
+
+        .diagram {
+            position: absolute;
+            right: 62px;
+            top: 64px;
+            width: 620px;
+            height: 590px;
+        }
+
+        .node {
+            position: absolute;
+            border: 2px solid var(--line);
+            background: rgba(13, 39, 48, 0.94);
+            color: var(--text);
+            min-height: 78px;
+            padding: 16px 18px;
+            display: grid;
+            align-content: center;
+            gap: 6px;
+        }
+
+        .node-title {
+            font-size: 22px;
+            font-weight: 850;
+            line-height: 1.1;
+        }
+
+        .node-subtitle {
+            color: var(--muted);
+            font-size: 16px;
+            line-height: 1.25;
+            font-weight: 650;
+        }
+
+        .chat {
+            left: 0;
+            top: 32px;
+            width: 240px;
+        }
+
+        .service {
+            right: 0;
+            top: 32px;
+            width: 300px;
+        }
+
+        .hash {
+            left: 46px;
+            top: 198px;
+            width: 528px;
+            height: 286px;
+            border-color: var(--redis);
+            background: rgba(255, 68, 56, 0.12);
+        }
+
+        .hash .node-title {
+            color: var(--redis);
+        }
+
+        .fields {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px 12px;
+            margin-top: 8px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 15px;
+            line-height: 1.15;
+        }
+
+        .field {
+            padding: 7px 8px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+        }
+
+        .status-row {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
+            flex-wrap: wrap;
+        }
+
+        .pill {
+            padding: 6px 10px;
+            border-radius: 999px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 14px;
+            font-weight: 850;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .running {
+            color: var(--blue);
+            background: rgba(145, 189, 255, 0.15);
+        }
+
+        .completed {
+            color: var(--green);
+            background: rgba(69, 212, 131, 0.15);
+        }
+
+        .failed {
+            color: var(--danger);
+            background: rgba(255, 111, 123, 0.15);
+        }
+
+        .viewer {
+            left: 150px;
+            top: 512px;
+            width: 320px;
+        }
+
+        .arrow {
+            position: absolute;
+            color: var(--text);
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 34px;
+            font-weight: 900;
+            line-height: 1;
+        }
+
+        .arrow-one {
+            left: 276px;
+            top: 62px;
+        }
+
+        .arrow-two {
+            left: 486px;
+            top: 132px;
+        }
+
+        .arrow-three {
+            left: 298px;
+            top: 472px;
+        }
+
+        .step-label {
+            position: absolute;
+            color: var(--muted);
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 14px;
+            font-weight: 800;
+            text-transform: uppercase;
+        }
+
+        .label-start {
+            left: 276px;
+            top: 26px;
+        }
+
+        .label-write {
+            right: 18px;
+            top: 146px;
+            width: 160px;
+        }
+
+        .label-read {
+            left: 302px;
+            top: 496px;
+        }
+    </style>
+</head>
+<body>
+<main class="slide" aria-label="Workflow state diagram">
+    <section class="title">
+        <div class="eyebrow">Chapter 1</div>
+        <h1>Workflow State</h1>
+    </section>
+
+    <section class="question">
+        What if a chat turn needs a <strong>current state</strong> that can be inspected while it is running?
+    </section>
+
+    <section class="key">
+        <div class="key-label">Redis hash key</div>
+        <div class="key-name">stock-analysis:workflows:{workflowId}</div>
+    </section>
+
+    <section class="diagram">
+        <div class="node chat">
+            <div class="node-title">Chat turn</div>
+            <div class="node-subtitle">User asks a stock question</div>
+        </div>
+
+        <div class="node service">
+            <div class="node-title">Workflow service</div>
+            <div class="node-subtitle">Creates the workflowId and writes state</div>
+        </div>
+
+        <div class="node hash">
+            <div class="node-title">Redis hash</div>
+            <div class="node-subtitle">One record for the current turn</div>
+            <div class="fields">
+                <div class="field">workflowId</div>
+                <div class="field">status</div>
+                <div class="field">userId</div>
+                <div class="field">sessionId</div>
+                <div class="field">attempt</div>
+                <div class="field">turnIndex</div>
+                <div class="field">createdAt</div>
+                <div class="field">updatedAt</div>
+            </div>
+            <div class="status-row">
+                <span class="pill running">RUNNING</span>
+                <span class="pill completed">COMPLETED</span>
+                <span class="pill failed">FAILED</span>
+            </div>
+        </div>
+
+        <div class="node viewer">
+            <div class="node-title">Inspectable turn</div>
+            <div class="node-subtitle">UI or Grafana reads the hash</div>
+        </div>
+
+        <div class="step-label label-start">start</div>
+        <div class="arrow arrow-one">→</div>
+
+        <div class="step-label label-write">HSET current state</div>
+        <div class="arrow arrow-two">↓</div>
+
+        <div class="step-label label-read">HGETALL</div>
+        <div class="arrow arrow-three">↓</div>
+    </section>
+</main>
+</body>
+</html>

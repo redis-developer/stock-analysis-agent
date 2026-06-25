@@ -13,8 +13,8 @@ import com.redis.stockanalysisagent.session.dto.ChatSessionWorkflowStep;
 import com.redis.stockanalysisagent.workflow.WorkflowMetadata;
 import com.redis.stockanalysisagent.workflow.WorkflowService;
 import com.redis.stockanalysisagent.workflow.WorkflowStatus;
-import com.redis.stockanalysisagent.workflow.ToolApproval;
-import com.redis.stockanalysisagent.workflow.WorkflowApprovalService;
+import com.redis.stockanalysisagent.workflow.approval.ToolApproval;
+import com.redis.stockanalysisagent.workflow.approval.WorkflowApprovalService;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,7 +27,6 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.time.Instant;
 
@@ -40,6 +39,7 @@ public class ChatSessionService {
     private final ChatMemory chatMemory;
     private final AmsChatMemoryRepository memoryRepository;
     private final WorkflowService workflowService;
+    private final WorkflowStepProjector workflowStepProjector;
     private final ChatSessionIndexService sessionIndexService;
     private final WorkflowApprovalService approvalService;
 
@@ -51,6 +51,7 @@ public class ChatSessionService {
                 chatMemory,
                 memoryRepository,
                 (WorkflowService) null,
+                (WorkflowStepProjector) null,
                 (ChatSessionIndexService) null,
                 (WorkflowApprovalService) null
         );
@@ -61,6 +62,7 @@ public class ChatSessionService {
             ChatMemory chatMemory,
             AmsChatMemoryRepository memoryRepository,
             ObjectProvider<WorkflowService> workflowService,
+            ObjectProvider<WorkflowStepProjector> workflowStepProjector,
             ObjectProvider<ChatSessionIndexService> sessionIndexService,
             ObjectProvider<WorkflowApprovalService> approvalService
     ) {
@@ -68,6 +70,7 @@ public class ChatSessionService {
                 chatMemory,
                 memoryRepository,
                 workflowService.getIfAvailable(),
+                workflowStepProjector.getIfAvailable(),
                 sessionIndexService.getIfAvailable(),
                 approvalService.getIfAvailable()
         );
@@ -78,7 +81,7 @@ public class ChatSessionService {
             AmsChatMemoryRepository memoryRepository,
             WorkflowService workflowService
     ) {
-        this(chatMemory, memoryRepository, workflowService, null, null);
+        this(chatMemory, memoryRepository, workflowService, null, null, null);
     }
 
     ChatSessionService(
@@ -87,19 +90,21 @@ public class ChatSessionService {
             WorkflowService workflowService,
             ChatSessionIndexService sessionIndexService
     ) {
-        this(chatMemory, memoryRepository, workflowService, sessionIndexService, null);
+        this(chatMemory, memoryRepository, workflowService, null, sessionIndexService, null);
     }
 
     ChatSessionService(
             ChatMemory chatMemory,
             AmsChatMemoryRepository memoryRepository,
             WorkflowService workflowService,
+            WorkflowStepProjector workflowStepProjector,
             ChatSessionIndexService sessionIndexService,
             WorkflowApprovalService approvalService
     ) {
         this.chatMemory = chatMemory;
         this.memoryRepository = memoryRepository;
         this.workflowService = workflowService;
+        this.workflowStepProjector = workflowStepProjector;
         this.sessionIndexService = sessionIndexService;
         this.approvalService = approvalService;
     }
@@ -225,7 +230,8 @@ public class ChatSessionService {
                         stringList(message.metadata(), "retrievedMemories"),
                         booleanFlag(message.metadata(), "fromSemanticCache"),
                         booleanFlag(message.metadata(), "fromSemanticGuardrail"),
-                        pendingApproval(message.metadata())
+                        pendingApproval(message.metadata()),
+                        workflowId(message.metadata())
                 )
                 : null;
     }
@@ -325,7 +331,9 @@ public class ChatSessionService {
             return new RecoverySource(replayedFromWorkflowId, replayCheckpointId);
         }
         if (workflow.status() == WorkflowStatus.RECOVERING) {
-            String latestCheckpointId = latestCheckpointId(workflow.workflowId());
+            String latestCheckpointId = workflowStepProjector == null
+                    ? null
+                    : workflowStepProjector.latestCheckpointId(workflow.workflowId(), LIVE_WORKFLOW_EVENT_LIMIT);
             if (latestCheckpointId != null) {
                 return new RecoverySource(workflow.workflowId(), latestCheckpointId);
             }
@@ -343,108 +351,17 @@ public class ChatSessionService {
                 recoverySource.recoveredFromWorkflowId(),
                 recoverySource.checkpointId()
         ));
-        steps.addAll(workflowService.workflowEvents(workflowId, LIVE_WORKFLOW_EVENT_LIMIT).stream()
-                .map(event -> workflowStep(event, false))
-                .filter(step -> step != null)
-                .toList());
+        if (workflowStepProjector != null) {
+            steps.addAll(workflowStepProjector.liveSteps(workflowId, LIVE_WORKFLOW_EVENT_LIMIT));
+        }
         return List.copyOf(steps);
     }
 
     private List<ChatSessionWorkflowStep> recoveredWorkflowSteps(String workflowId, String checkpointId) {
-        if (workflowId == null || checkpointId == null) {
+        if (workflowStepProjector == null) {
             return List.of();
         }
-
-        List<Map<String, String>> events = workflowService.workflowEvents(workflowId, LIVE_WORKFLOW_EVENT_LIMIT);
-        boolean hasCheckpointEvent = events.stream()
-                .anyMatch(event -> checkpointId.equals(value(event, "checkpointId")));
-        String checkpointedStepId = checkpointedStepId(checkpointId);
-        List<ChatSessionWorkflowStep> steps = new ArrayList<>();
-        boolean foundCheckpoint = false;
-        for (Map<String, String> event : events) {
-            ChatSessionWorkflowStep step = workflowStep(event, true);
-            if (step != null) {
-                steps.add(step);
-            }
-            if (checkpointId.equals(value(event, "checkpointId"))
-                    || (!hasCheckpointEvent && isCompletedStep(event, checkpointedStepId))) {
-                foundCheckpoint = true;
-                break;
-            }
-        }
-
-        return foundCheckpoint ? List.copyOf(steps) : List.of();
-    }
-
-    private String checkpointedStepId(String checkpointId) {
-        String value = blankToNull(checkpointId);
-        if (value == null) {
-            return "";
-        }
-        int lastSeparator = value.lastIndexOf(':');
-        if (lastSeparator < 0) {
-            return value;
-        }
-        int actorSeparator = value.lastIndexOf(':', lastSeparator - 1);
-        if (actorSeparator < 0) {
-            return value;
-        }
-        return value.substring(0, actorSeparator);
-    }
-
-    private boolean isCompletedStep(Map<String, String> event, String stepId) {
-        return stepId != null
-                && !stepId.isBlank()
-                && stepId.equals(value(event, "stepId"))
-                && "completed".equals(value(event, "status"));
-    }
-
-    private String latestCheckpointId(String workflowId) {
-        List<Map<String, String>> events = workflowService.workflowEvents(workflowId, LIVE_WORKFLOW_EVENT_LIMIT);
-        for (int index = events.size() - 1; index >= 0; index--) {
-            String checkpointId = blankToNull(events.get(index).get("checkpointId"));
-            if (checkpointId != null) {
-                return checkpointId;
-            }
-        }
-        return null;
-    }
-
-    private ChatSessionWorkflowStep workflowStep(Map<String, String> event, boolean recovered) {
-        if (event == null || event.isEmpty()) {
-            return null;
-        }
-
-        String stepId = value(event, "stepId");
-        if (stepId.isBlank()) {
-            return null;
-        }
-
-        String toolName = value(event, "toolName");
-        return new ChatSessionWorkflowStep(
-                stepId,
-                workflowStepLabel(stepId, toolName),
-                value(event, "kind"),
-                value(event, "status"),
-                longObject(value(event, "durationMs")),
-                value(event, "summary"),
-                value(event, "actorType"),
-                value(event, "actorName"),
-                recovered
-        );
-    }
-
-    private String workflowStepLabel(String stepId, String toolName) {
-        if (toolName != null && !toolName.isBlank()) {
-            return "Tool " + toolName;
-        }
-        if (stepId == null || stepId.isBlank()) {
-            return "Workflow step";
-        }
-        if (stepId.startsWith("checkpoint:")) {
-            return "Checkpoint";
-        }
-        return stepId.replace(':', ' ').replace('_', ' ').toLowerCase(Locale.ROOT);
+        return workflowStepProjector.recoveredSteps(workflowId, checkpointId, LIVE_WORKFLOW_EVENT_LIMIT);
     }
 
     private String workflowMode(Map<String, String> fields) {
@@ -460,17 +377,6 @@ public class ChatSessionService {
     private String value(Map<String, String> fields, String name) {
         String value = fields.get(name);
         return value == null ? "" : value;
-    }
-
-    private Long longObject(String value) {
-        if (value == null || value.isBlank()) {
-            return null;
-        }
-        try {
-            return Math.max(0, Long.parseLong(value));
-        } catch (NumberFormatException ignored) {
-            return null;
-        }
     }
 
     private String blankToNull(String value) {
@@ -637,6 +543,10 @@ public class ChatSessionService {
         return approvalService.readApproval(storedApproval.approvalId())
                 .filter(ToolApproval::pending)
                 .orElse(null);
+    }
+
+    private String workflowId(Map<String, Object> metadata) {
+        return text(metadata == null ? null : metadata.get("workflowId"));
     }
 
     private ExternalDataAccess dataAccess(Object value) {

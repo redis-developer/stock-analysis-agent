@@ -17,7 +17,7 @@ import com.redis.stockanalysisagent.agent.technicalanalysis.TechnicalAnalysisAge
 import com.redis.stockanalysisagent.agent.technicalanalysis.TechnicalAnalysisResult;
 import com.redis.stockanalysisagent.backtest.BacktestReport;
 import com.redis.stockanalysisagent.cache.ExternalDataCache;
-import com.redis.stockanalysisagent.chat.ChatProgressPublisher;
+import com.redis.stockanalysisagent.chat.WorkflowProgress;
 import com.redis.stockanalysisagent.stock.FundamentalsSnapshot;
 import com.redis.stockanalysisagent.stock.MarketSnapshot;
 import com.redis.stockanalysisagent.stock.NewsItem;
@@ -47,7 +47,7 @@ class CoordinatorAgentToolsTests {
     private final BacktestAgent backtestAgent = mock(BacktestAgent.class);
     private final SynthesisAgent synthesisAgent = mock(SynthesisAgent.class);
     private final ExternalDataCache externalDataCache = mock(ExternalDataCache.class);
-    private final ChatProgressPublisher progressPublisher = mock(ChatProgressPublisher.class);
+    private final WorkflowProgress workflowProgress = mock(WorkflowProgress.class);
     private final CoordinatorAgentTools tools = new CoordinatorAgentTools(
             marketDataAgent,
             fundamentalsAgent,
@@ -56,7 +56,7 @@ class CoordinatorAgentToolsTests {
             backtestAgent,
             synthesisAgent,
             externalDataCache,
-            progressPublisher
+            workflowProgress
     );
 
     @Test

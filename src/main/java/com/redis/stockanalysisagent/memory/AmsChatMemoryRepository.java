@@ -9,7 +9,7 @@ import com.redis.stockanalysisagent.chat.ChatExecutionStep;
 import com.redis.stockanalysisagent.memory.service.AgentMemoryService;
 import com.redis.stockanalysisagent.memory.service.AgentMemoryApiModels.SessionEvent;
 import com.redis.stockanalysisagent.session.ConversationId;
-import com.redis.stockanalysisagent.workflow.ToolApproval;
+import com.redis.stockanalysisagent.workflow.approval.ToolApproval;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.memory.ChatMemoryRepository;
@@ -182,6 +182,34 @@ public class AmsChatMemoryRepository implements ChatMemoryRepository {
             List<String> retrievedMemories,
             ToolApproval pendingApproval
     ) {
+        saveTurn(
+                conversationId,
+                userMessage,
+                assistantResponse,
+                executionSteps,
+                tickers,
+                triggeredAgents,
+                fromSemanticCache,
+                fromSemanticGuardrail,
+                retrievedMemories,
+                pendingApproval,
+                null
+        );
+    }
+
+    public void saveTurn(
+            String conversationId,
+            String userMessage,
+            String assistantResponse,
+            List<ChatExecutionStep> executionSteps,
+            List<String> tickers,
+            List<String> triggeredAgents,
+            boolean fromSemanticCache,
+            boolean fromSemanticGuardrail,
+            List<String> retrievedMemories,
+            ToolApproval pendingApproval,
+            String workflowId
+    ) {
         ConversationId parsed = ConversationId.parse(conversationId);
         String userId = parsed.userId();
         String sessionId = parsed.sessionId();
@@ -213,7 +241,8 @@ public class AmsChatMemoryRepository implements ChatMemoryRepository {
                                 fromSemanticCache,
                                 fromSemanticGuardrail,
                                 retrievedMemories,
-                                pendingApproval
+                                pendingApproval,
+                                workflowId
                         )
                 );
             }
@@ -354,7 +383,30 @@ public class AmsChatMemoryRepository implements ChatMemoryRepository {
             List<String> retrievedMemories,
             ToolApproval pendingApproval
     ) {
+        return assistantMetadata(
+                executionSteps,
+                tickers,
+                triggeredAgents,
+                fromSemanticCache,
+                fromSemanticGuardrail,
+                retrievedMemories,
+                pendingApproval,
+                null
+        );
+    }
+
+    private Map<String, Object> assistantMetadata(
+            List<ChatExecutionStep> executionSteps,
+            List<String> tickers,
+            List<String> triggeredAgents,
+            boolean fromSemanticCache,
+            boolean fromSemanticGuardrail,
+            List<String> retrievedMemories,
+            ToolApproval pendingApproval,
+            String workflowId
+    ) {
         Map<String, Object> metadata = new LinkedHashMap<>();
+        putIfPresent(metadata, "workflowId", workflowId);
         if (fromSemanticCache) {
             metadata.put("fromSemanticCache", true);
         }

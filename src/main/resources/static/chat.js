@@ -542,6 +542,12 @@
     }
 
     async function onCircuitBreakerListClick(event) {
+        const stateButton = event.target.closest("[data-circuit-state-provider]");
+        if (stateButton) {
+            await onCircuitBreakerStateClick(stateButton);
+            return;
+        }
+
         const latencyButton = event.target.closest("[data-latency-provider]");
         if (latencyButton) {
             await onLatencySimulationClick(latencyButton);
@@ -574,6 +580,28 @@
             setStatus(enabled ? "Failure simulation on" : "Failure simulation off");
         } catch (error) {
             setStatus("Simulator update failed", "error");
+        } finally {
+            button.disabled = false;
+        }
+    }
+
+    async function onCircuitBreakerStateClick(button) {
+        const providerId = normalizeProviderId(button.dataset.circuitStateProvider);
+        if (!providerId) {
+            return;
+        }
+
+        const current = circuitBreakerByProvider(providerId);
+        const stateName = normalizeCircuitState(current && current.circuitBreaker && current.circuitBreaker.state);
+        const action = stateName === "OPEN" ? "close" : "open";
+        button.disabled = true;
+        try {
+            const updated = await updateCircuitBreakerState(providerId, action);
+            mergeCircuitBreakerState(providerId, updated);
+            renderCircuitBreakers();
+            setStatus(action === "open" ? "Circuit opened" : "Circuit closed");
+        } catch (error) {
+            setStatus("Circuit update failed", "error");
         } finally {
             button.disabled = false;
         }
@@ -1016,6 +1044,7 @@
             role: "assistant",
             content: response.response || "No response returned.",
             timestamp: new Date().toISOString(),
+            workflowId: normalizeWorkflowId(response.workflowId),
             memories: response.retrievedMemories || [],
             fromSemanticCache: Boolean(response.fromSemanticCache),
             fromSemanticGuardrail: Boolean(response.fromSemanticGuardrail),
@@ -1362,6 +1391,34 @@
             },
             body: JSON.stringify({ enabled: Boolean(enabled) })
         });
+        const contentType = response.headers.get("content-type") || "";
+        const rawBody = await response.text();
+        const body = contentType.includes("application/json") ? safeParseJson(rawBody) : null;
+
+        if (!response.ok) {
+            if (handleUnauthorizedResponse(response)) {
+                throw new Error("Login is required.");
+            }
+            throw new Error(extractErrorMessage(body, rawBody, response.status));
+        }
+
+        return body || {};
+    }
+
+    async function updateCircuitBreakerState(providerId, action) {
+        const endpoint = action === "close" ? "close" : "open";
+        const options = { method: "POST" };
+        if (endpoint === "open") {
+            options.headers = {
+                "Content-Type": "application/json"
+            };
+            options.body = JSON.stringify({ reason: "Manual override from UI" });
+        }
+
+        const response = await fetch(new URL(
+            "./api/circuit-breakers/" + encodeURIComponent(providerId) + "/" + endpoint,
+            window.location.href
+        ), options);
         const contentType = response.headers.get("content-type") || "";
         const rawBody = await response.text();
         const body = contentType.includes("application/json") ? safeParseJson(rawBody) : null;
@@ -1894,6 +1951,7 @@
                 memories: stringListSignature(message && message.memories),
                 fromSemanticCache: Boolean(message && message.fromSemanticCache),
                 fromSemanticGuardrail: Boolean(message && message.fromSemanticGuardrail),
+                workflowId: normalizeWorkflowId(message && message.workflowId),
                 pendingApproval: approvalSignature(message && message.pendingApproval),
                 steps: stepListSignature(message && message.executionSteps),
                 tokenUsage: tokenUsageSignature(message && message.tokenUsage)
@@ -2327,8 +2385,11 @@
         const nextActivitySteps = Array.isArray(nextMessage.activitySteps) ? nextMessage.activitySteps : [];
         const nextApproval = normalizePendingApproval(nextMessage.pendingApproval);
         const localApproval = normalizePendingApproval(localMessage.pendingApproval);
+        const nextWorkflowId = normalizeWorkflowId(nextMessage.workflowId);
+        const localWorkflowId = normalizeWorkflowId(localMessage.workflowId);
 
         return Object.assign({}, nextMessage, {
+            workflowId: nextWorkflowId || localWorkflowId,
             memories: nextMemories.length > 0 ? nextMemories : localMemories,
             fromSemanticCache: Boolean(nextMessage.fromSemanticCache || localMessage.fromSemanticCache),
             fromSemanticGuardrail: Boolean(nextMessage.fromSemanticGuardrail || localMessage.fromSemanticGuardrail),
@@ -2461,9 +2522,14 @@
         name.textContent = status.label || formatProviderLabel(providerId);
         header.appendChild(name);
 
-        const badge = document.createElement("span");
+        const badge = document.createElement("button");
         badge.className = "circuit-provider__state circuit-provider__state--" + stateName.toLowerCase().replace("_", "-");
+        badge.type = "button";
+        badge.dataset.circuitStateProvider = providerId;
         badge.textContent = formatCircuitState(stateName);
+        badge.title = stateName === "OPEN"
+            ? "Close circuit for " + (status.label || providerId)
+            : "Open circuit for " + (status.label || providerId);
         header.appendChild(badge);
         row.appendChild(header);
 
@@ -3211,6 +3277,30 @@
         state.circuitBreakers = statuses;
     }
 
+    function mergeCircuitBreakerState(providerId, breaker) {
+        const normalizedProvider = normalizeProviderId(providerId || (breaker && breaker.providerId));
+        if (!normalizedProvider || !breaker || typeof breaker !== "object") {
+            return;
+        }
+
+        const statuses = normalizeCircuitBreakerStatuses(state.circuitBreakers);
+        const index = statuses.findIndex(function (existing) {
+            return existing.providerId === normalizedProvider;
+        });
+        const current = index >= 0
+            ? statuses[index]
+            : normalizeCircuitBreakerStatus({ providerId: normalizedProvider });
+
+        statuses[index >= 0 ? index : statuses.length] = normalizeCircuitBreakerStatus({
+            ...current,
+            circuitBreaker: {
+                ...current.circuitBreaker,
+                ...breaker
+            }
+        });
+        state.circuitBreakers = statuses;
+    }
+
     function circuitBreakerByProvider(providerId) {
         const normalizedProvider = normalizeProviderId(providerId);
         return normalizeCircuitBreakerStatuses(state.circuitBreakers).find(function (status) {
@@ -3584,9 +3674,18 @@
 
         const tokenUsage = resolveTokenUsage(message);
         const responseTimeMs = message.role === "assistant" ? resolveMessageResponseTime(message) : null;
-        if (message.fromSemanticGuardrail || message.fromSemanticCache || responseTimeMs != null || tokenUsage) {
+        const workflowId = message.role === "assistant" ? resolveMessageWorkflowId(message) : "";
+        if (workflowId || message.fromSemanticGuardrail || message.fromSemanticCache || responseTimeMs != null || tokenUsage) {
             const badges = document.createElement("div");
             badges.className = "message__badges";
+
+            if (workflowId) {
+                const workflowBadge = document.createElement("span");
+                workflowBadge.className = "badge badge--workflow";
+                workflowBadge.title = "Workflow " + workflowId;
+                workflowBadge.textContent = formatWorkflowBadge(workflowId);
+                badges.appendChild(workflowBadge);
+            }
 
             if (message.fromSemanticGuardrail) {
                 const guardrailBadge = document.createElement("span");
@@ -4872,11 +4971,26 @@
                 responseTimeMs: responseTimeMs,
                 executionSteps: executionSteps,
                 activitySteps: role === "assistant" ? executionStepsToActivitySteps(executionSteps) : [],
-                pendingApproval: normalizePendingApproval(message && message.pendingApproval)
+                pendingApproval: normalizePendingApproval(message && message.pendingApproval),
+                workflowId: normalizeWorkflowId(message && message.workflowId)
             };
         }).filter(function (message) {
             return Boolean(message) && !isApprovalHidden(message.pendingApproval);
         });
+    }
+
+    function normalizeWorkflowId(workflowId) {
+        return normalizeSessionValue(workflowId);
+    }
+
+    function resolveMessageWorkflowId(message) {
+        return normalizeWorkflowId(message && message.workflowId)
+            || normalizeWorkflowId(message && message.pendingApproval && message.pendingApproval.workflowId);
+    }
+
+    function formatWorkflowBadge(workflowId) {
+        const normalized = normalizeWorkflowId(workflowId);
+        return normalized ? "Workflow " + normalized.slice(0, 8) : "";
     }
 
     function normalizePendingApproval(approval) {

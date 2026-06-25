@@ -1,0 +1,135 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
+      "title": "Workflow Event Log",
+      "tooltip": "Open the detailed workflow dashboard",
+      "type": "link",
+      "url": "/d/stock-analysis-workflows/workflow-event-log"
+    }
+  ],
+  "panels": [
+    {
+      "datasource": {
+        "type": "redis-datasource",
+        "uid": "redis"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "content": "This dashboard lists current workflow hash state from `stock-analysis:workflows:{workflowId}`. Use the filters to scope by user or conversation.",
+        "mode": "markdown"
+      },
+      "pluginVersion": "11.0.0",
+      "title": "Workflow state",
+      "type": "text"
+    },
+    {
+      "datasource": {
+        "type": "redis-datasource",
+        "uid": "redis"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 20,
+        "w": 24,
+        "x": 0,
+        "y": 4
+      },
+      "id": 2,
+      "options": {
+        "content": "<iframe title=\"Workflow states\" src=\"@@STOCK_ANALYSIS_AGENT_APP_BASE_URL@@/api/workflows/states?userId=${user_id}&conversationId=${conversation_id}\" style=\"width:100%;height:100%;border:0;background:#111217;\"></iframe>",
+        "mode": "html"
+      },
+      "pluginVersion": "11.0.0",
+      "title": "Workflow hashes",
+      "type": "text"
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 39,
+  "tags": [
+    "redis",
+    "agents",
+    "workflow",
+    "state"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {},
+        "datasource": {
+          "type": "redis-datasource",
+          "uid": "redis"
+        },
+        "definition": "keys stock-analysis:users:*:workflows",
+        "hide": 0,
+        "includeAll": false,
+        "label": "User",
+        "multi": false,
+        "name": "user_id",
+        "options": [],
+        "query": "keys stock-analysis:users:*:workflows",
+        "refresh": 2,
+        "regex": "/stock-analysis:users:([^:]+):workflows/",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": {},
+        "datasource": {
+          "type": "redis-datasource",
+          "uid": "redis"
+        },
+        "definition": "lrange stock-analysis:users:${user_id}:conversations 0 -1",
+        "hide": 0,
+        "includeAll": false,
+        "label": "Conversation",
+        "multi": false,
+        "name": "conversation_id",
+        "options": [],
+        "query": "lrange stock-analysis:users:${user_id}:conversations 0 -1",
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 0,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Workflow States",
+  "uid": "stock-analysis-workflow-states",
+  "version": 1,
+  "weekStart": ""
+}

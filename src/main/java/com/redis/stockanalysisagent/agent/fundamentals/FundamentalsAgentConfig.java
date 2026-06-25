@@ -1,6 +1,6 @@
 package com.redis.stockanalysisagent.agent.fundamentals;
 
-import com.redis.stockanalysisagent.chat.ChatProgressPublisher;
+import com.redis.stockanalysisagent.chat.WorkflowProgress;
 import com.redis.stockanalysisagent.instrumentation.ToolCallInstrumentation;
 import com.redis.stockanalysisagent.providers.FundamentalsProvider;
 import com.redis.stockanalysisagent.stock.MarketSnapshot;
@@ -40,7 +40,7 @@ public class FundamentalsAgentConfig {
         return marketSnapshot -> ChatClient.builder(chatModel)
                 .defaultAdvisors(AdvisorParams.ENABLE_NATIVE_STRUCTURED_OUTPUT)
                 .defaultTools(toolCallInstrumentation.callbacks(
-                        ChatProgressPublisher.ACTOR_TYPE_SUB_AGENT,
+                        WorkflowProgress.ACTOR_TYPE_SUB_AGENT,
                         "fundamentals",
                         new FundamentalsTools(fundamentalsProvider, marketSnapshot)
                 ))

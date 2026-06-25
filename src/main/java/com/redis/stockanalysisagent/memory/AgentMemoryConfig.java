@@ -1,6 +1,6 @@
 package com.redis.stockanalysisagent.memory;
 
-import com.redis.stockanalysisagent.chat.ChatProgressPublisher;
+import com.redis.stockanalysisagent.chat.WorkflowProgress;
 import com.redis.stockanalysisagent.memory.service.AgentMemoryService;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
@@ -41,9 +41,9 @@ public class AgentMemoryConfig {
     public LongTermMemoryAdvisor longTermMemoryAdvisor(
             AgentMemoryService agentMemoryService,
             AmsChatMemoryRepository memoryRepository,
-            ChatProgressPublisher progressPublisher
+            WorkflowProgress workflowProgress
     ) {
-        return new LongTermMemoryAdvisor(agentMemoryService, memoryRepository, progressPublisher, 5);
+        return new LongTermMemoryAdvisor(agentMemoryService, memoryRepository, workflowProgress, 5);
     }
 
     private String requireText(String value, String propertyName) {

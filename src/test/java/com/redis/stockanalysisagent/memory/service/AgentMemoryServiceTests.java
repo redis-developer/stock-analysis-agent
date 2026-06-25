@@ -2,7 +2,7 @@ package com.redis.stockanalysisagent.memory.service;
 
 import com.redis.agentmemory.models.workingmemory.MemoryMessage;
 import com.redis.stockanalysisagent.memory.AgentMemoryProperties;
-import com.redis.stockanalysisagent.reliability.CircuitBreakerService;
+import com.redis.stockanalysisagent.reliability.circuitbreaker.CircuitBreakerService;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;

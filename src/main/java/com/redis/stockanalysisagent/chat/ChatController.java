@@ -36,36 +36,36 @@ public class ChatController {
 
     private final ChatService chatService;
     private final ChatSessionAccess sessionAccess;
-    private final ChatProgressPublisher progressPublisher;
+    private final WorkflowProgress workflowProgress;
     private final ExternalApiUsageService apiUsageService;
 
     public ChatController(
             ChatService chatService,
             ChatSessionAccess sessionAccess,
-            ChatProgressPublisher progressPublisher
+            WorkflowProgress workflowProgress
     ) {
-        this(chatService, sessionAccess, progressPublisher, (ExternalApiUsageService) null);
+        this(chatService, sessionAccess, workflowProgress, (ExternalApiUsageService) null);
     }
 
     @Autowired
     public ChatController(
             ChatService chatService,
             ChatSessionAccess sessionAccess,
-            ChatProgressPublisher progressPublisher,
+            WorkflowProgress workflowProgress,
             ObjectProvider<ExternalApiUsageService> apiUsageService
     ) {
-        this(chatService, sessionAccess, progressPublisher, apiUsageService.getIfAvailable());
+        this(chatService, sessionAccess, workflowProgress, apiUsageService.getIfAvailable());
     }
 
     private ChatController(
             ChatService chatService,
             ChatSessionAccess sessionAccess,
-            ChatProgressPublisher progressPublisher,
+            WorkflowProgress workflowProgress,
             ExternalApiUsageService apiUsageService
     ) {
         this.chatService = chatService;
         this.sessionAccess = sessionAccess;
-        this.progressPublisher = progressPublisher;
+        this.workflowProgress = workflowProgress;
         this.apiUsageService = apiUsageService;
     }
 
@@ -87,7 +87,7 @@ public class ChatController {
         prepareStreamingResponse(httpResponse);
         StreamingResponseBody body = outputStream -> {
             try {
-                ChatResponse response = progressPublisher.capture(
+                ChatResponse response = workflowProgress.capture(
                         event -> writeJsonLine(outputStream, httpResponse, event),
                         () -> executeChat(prepared)
                 );
@@ -175,7 +175,7 @@ public class ChatController {
                 prepared.sessionId(),
                 prepared.clientRequestId()
         );
-        ChatService.ChatTurn turn = chatService.chat(
+        ChatService.ChatTurn turn = chatService.run(new ChatService.ChatRunRequest(
                 prepared.userId(),
                 prepared.sessionId(),
                 prepared.message(),
@@ -183,8 +183,13 @@ public class ChatController {
                 prepared.retrievedMemoriesLimit(),
                 prepared.apiCachingEnabled(),
                 prepared.semanticCachingEnabled(),
-                prepared.approvalRequiredTools()
-        );
+                prepared.approvalRequiredTools(),
+                "chat",
+                null,
+                null,
+                true,
+                null
+        ));
         long responseTimeMs = (System.nanoTime() - startedAt) / 1_000_000;
         log.info(
                 "chat_request_complete userId={} sessionId={} conversationId={} workflowId={} workflowStatus={} durationMs={}",

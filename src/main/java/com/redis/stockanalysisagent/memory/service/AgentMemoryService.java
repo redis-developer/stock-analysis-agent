@@ -7,7 +7,7 @@ import com.redis.agentmemory.models.workingmemory.WorkingMemory;
 import com.redis.agentmemory.models.workingmemory.WorkingMemoryResponse;
 import com.redis.stockanalysisagent.memory.AgentMemoryProperties;
 import com.redis.stockanalysisagent.memory.service.AgentMemoryApiModels.*;
-import com.redis.stockanalysisagent.reliability.CircuitBreakerService;
+import com.redis.stockanalysisagent.reliability.circuitbreaker.CircuitBreakerService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpMethod;

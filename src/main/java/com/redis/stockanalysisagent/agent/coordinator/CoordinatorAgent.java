@@ -3,7 +3,7 @@ package com.redis.stockanalysisagent.agent.coordinator;
 import com.redis.stockanalysisagent.agent.AgentExecution;
 import com.redis.stockanalysisagent.agent.TokenUsageSummary;
 import com.redis.stockanalysisagent.chat.ChatProgressMetadata;
-import com.redis.stockanalysisagent.chat.ChatProgressPublisher;
+import com.redis.stockanalysisagent.chat.WorkflowProgress;
 import com.redis.stockanalysisagent.memory.LongTermMemoryAdvisor;
 import com.redis.stockanalysisagent.semanticcache.SemanticAnalysisCache;
 import com.redis.stockanalysisagent.semanticcache.SemanticCacheAdvisor;
@@ -26,18 +26,18 @@ public class CoordinatorAgent {
     private final ChatClient coordinatorChatClient;
     private final CoordinatorAgentTools coordinatorAgentTools;
     private final SemanticAnalysisCache semanticAnalysisCache;
-    private final ChatProgressPublisher progressPublisher;
+    private final WorkflowProgress workflowProgress;
 
     public CoordinatorAgent(
             @Qualifier("coordinatorChatClient") ChatClient coordinatorChatClient,
             CoordinatorAgentTools coordinatorAgentTools,
             SemanticAnalysisCache semanticAnalysisCache,
-            ChatProgressPublisher progressPublisher
+            WorkflowProgress workflowProgress
     ) {
         this.coordinatorChatClient = coordinatorChatClient;
         this.coordinatorAgentTools = coordinatorAgentTools;
         this.semanticAnalysisCache = semanticAnalysisCache;
-        this.progressPublisher = progressPublisher;
+        this.workflowProgress = workflowProgress;
     }
 
     public CoordinationResult execute(
@@ -49,13 +49,13 @@ public class CoordinatorAgent {
     ) {
         coordinatorAgentTools.startTrace(userMessage);
         long startedAt = System.nanoTime();
-        progressPublisher.running(
+        workflowProgress.running(
                 "COORDINATOR",
                 "Calling coordinator",
-                ChatProgressPublisher.KIND_AGENT,
+                WorkflowProgress.KIND_AGENT,
                 "Routing the request and deciding which specialist agents to run.",
-                ChatProgressPublisher.ACTOR_TYPE_COORDINATOR,
-                ChatProgressPublisher.ACTOR_COORDINATOR,
+                WorkflowProgress.ACTOR_TYPE_COORDINATOR,
+                WorkflowProgress.ACTOR_COORDINATOR,
                 ChatProgressMetadata.input(userMessage)
         );
         log.info(
@@ -114,15 +114,15 @@ public class CoordinatorAgent {
                     metadataLong(chatResponse, SemanticGuardrailAdvisor.GUARDRAIL_DURATION_MS),
                     semanticCacheStored
             );
-            progressPublisher.completed(
+            workflowProgress.completed(
                     "COORDINATOR",
                     "Calling coordinator",
-                    ChatProgressPublisher.KIND_AGENT,
+                    WorkflowProgress.KIND_AGENT,
                     elapsedDurationMs(startedAt),
                     coordinatorProgressSummary(cacheHit, guardrailHit, agentExecutions),
                     result.tokenUsage(),
-                    ChatProgressPublisher.ACTOR_TYPE_COORDINATOR,
-                    ChatProgressPublisher.ACTOR_COORDINATOR,
+                    WorkflowProgress.ACTOR_TYPE_COORDINATOR,
+                    WorkflowProgress.ACTOR_COORDINATOR,
                     ChatProgressMetadata.payload(
                             userMessage,
                             coordinatorOutputPayload(coordinatorResponse, agentExecutions, cacheHit, guardrailHit)
@@ -146,14 +146,14 @@ public class CoordinatorAgent {
                     ex.getClass().getSimpleName(),
                     ex
             );
-            progressPublisher.failed(
+            workflowProgress.failed(
                     "COORDINATOR",
                     "Calling coordinator",
-                    ChatProgressPublisher.KIND_AGENT,
+                    WorkflowProgress.KIND_AGENT,
                     elapsedDurationMs(startedAt),
                     errorMessage(ex),
-                    ChatProgressPublisher.ACTOR_TYPE_COORDINATOR,
-                    ChatProgressPublisher.ACTOR_COORDINATOR,
+                    WorkflowProgress.ACTOR_TYPE_COORDINATOR,
+                    WorkflowProgress.ACTOR_COORDINATOR,
                     ChatProgressMetadata.input(userMessage)
             );
             throw ex;
@@ -277,28 +277,28 @@ public class CoordinatorAgent {
         }
 
         long startedAt = System.nanoTime();
-        progressPublisher.running(
+        workflowProgress.running(
                 "SEMANTIC_CACHE_STORE",
                 "Semantic cache store",
-                ChatProgressPublisher.KIND_SYSTEM,
+                WorkflowProgress.KIND_SYSTEM,
                 "Storing the final answer in the semantic cache."
         );
         try {
             semanticAnalysisCache.storeFinalResponse(semanticCacheKey.trim(), response.trim());
-            progressPublisher.completed(
+            workflowProgress.completed(
                     "SEMANTIC_CACHE_STORE",
                     "Semantic cache store",
-                    ChatProgressPublisher.KIND_SYSTEM,
+                    WorkflowProgress.KIND_SYSTEM,
                     elapsedDurationMs(startedAt),
                     "Stored the final answer in the semantic cache."
             );
             return true;
         } catch (RuntimeException ex) {
             log.warn("Skipping semantic cache store because persistence failed.", ex);
-            progressPublisher.failed(
+            workflowProgress.failed(
                     "SEMANTIC_CACHE_STORE",
                     "Semantic cache store",
-                    ChatProgressPublisher.KIND_SYSTEM,
+                    WorkflowProgress.KIND_SYSTEM,
                     elapsedDurationMs(startedAt),
                     errorMessage(ex)
             );

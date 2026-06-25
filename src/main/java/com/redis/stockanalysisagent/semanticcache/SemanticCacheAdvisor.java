@@ -1,6 +1,6 @@
 package com.redis.stockanalysisagent.semanticcache;
 
-import com.redis.stockanalysisagent.chat.ChatProgressPublisher;
+import com.redis.stockanalysisagent.chat.WorkflowProgress;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClientRequest;
@@ -21,11 +21,11 @@ public class SemanticCacheAdvisor implements CallAdvisor {
     private static final int DEFAULT_ORDER = 20;
 
     private final SemanticAnalysisCache semanticCache;
-    private final ChatProgressPublisher progressPublisher;
+    private final WorkflowProgress workflowProgress;
 
-    public SemanticCacheAdvisor(SemanticAnalysisCache semanticCache, ChatProgressPublisher progressPublisher) {
+    public SemanticCacheAdvisor(SemanticAnalysisCache semanticCache, WorkflowProgress workflowProgress) {
         this.semanticCache = semanticCache;
-        this.progressPublisher = progressPublisher;
+        this.workflowProgress = workflowProgress;
     }
 
     @Override
@@ -41,10 +41,10 @@ public class SemanticCacheAdvisor implements CallAdvisor {
     @Override
     public ChatClientResponse adviseCall(ChatClientRequest request, CallAdvisorChain chain) {
         if (SemanticCacheSupport.shouldBypass(request)) {
-            progressPublisher.completed(
+            workflowProgress.completed(
                     "SEMANTIC_CACHE",
                     "Semantic cache",
-                    ChatProgressPublisher.KIND_SYSTEM,
+                    WorkflowProgress.KIND_SYSTEM,
                     0,
                     "Skipped semantic cache for this request."
             );
@@ -57,20 +57,20 @@ public class SemanticCacheAdvisor implements CallAdvisor {
         }
 
         long startedAt = System.nanoTime();
-        progressPublisher.running(
+        workflowProgress.running(
                 "SEMANTIC_CACHE",
                 "Semantic cache",
-                ChatProgressPublisher.KIND_SYSTEM,
+                WorkflowProgress.KIND_SYSTEM,
                 "Checking Redis semantic cache."
         );
         try {
             var cachedResponse = semanticCache.findCachedResponse(cacheKey);
             long durationMs = elapsedDurationMs(startedAt);
             if (cachedResponse.isPresent()) {
-                progressPublisher.completed(
+                workflowProgress.completed(
                         "SEMANTIC_CACHE",
                         "Semantic cache",
-                        ChatProgressPublisher.KIND_SYSTEM,
+                        WorkflowProgress.KIND_SYSTEM,
                         durationMs,
                         "Found a reusable response in the semantic cache."
                 );
@@ -78,20 +78,20 @@ public class SemanticCacheAdvisor implements CallAdvisor {
             }
         } catch (RuntimeException ex) {
             log.warn("Skipping semantic cache lookup because retrieval failed.", ex);
-            progressPublisher.failed(
+            workflowProgress.failed(
                     "SEMANTIC_CACHE",
                     "Semantic cache",
-                    ChatProgressPublisher.KIND_SYSTEM,
+                    WorkflowProgress.KIND_SYSTEM,
                     elapsedDurationMs(startedAt),
                     errorMessage(ex)
             );
         }
 
         long durationMs = elapsedDurationMs(startedAt);
-        progressPublisher.completed(
+        workflowProgress.completed(
                 "SEMANTIC_CACHE",
                 "Semantic cache",
-                ChatProgressPublisher.KIND_SYSTEM,
+                WorkflowProgress.KIND_SYSTEM,
                 durationMs,
                 "No reusable response found in the semantic cache."
         );

@@ -17,12 +17,12 @@ import com.redis.stockanalysisagent.agent.synthesis.SynthesisResult;
 import com.redis.stockanalysisagent.agent.technicalanalysis.TechnicalAnalysisAgent;
 import com.redis.stockanalysisagent.agent.technicalanalysis.TechnicalAnalysisResult;
 import com.redis.stockanalysisagent.chat.ChatProgressMetadata;
-import com.redis.stockanalysisagent.chat.ChatProgressPublisher;
+import com.redis.stockanalysisagent.chat.WorkflowProgress;
 import com.redis.stockanalysisagent.cache.ExternalDataAccess;
 import com.redis.stockanalysisagent.cache.ExternalDataCache;
 import com.redis.stockanalysisagent.stock.MarketSnapshot;
-import com.redis.stockanalysisagent.workflow.ToolApproval;
-import com.redis.stockanalysisagent.workflow.WorkflowApprovalService;
+import com.redis.stockanalysisagent.workflow.approval.ToolApproval;
+import com.redis.stockanalysisagent.workflow.approval.WorkflowApprovalService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -51,7 +51,7 @@ public class CoordinatorAgentTools {
     private final BacktestAgent backtestAgent;
     private final SynthesisAgent synthesisAgent;
     private final ExternalDataCache externalDataCache;
-    private final ChatProgressPublisher progressPublisher;
+    private final WorkflowProgress workflowProgress;
     private final WorkflowApprovalService approvalService;
     private final ThreadLocal<ExecutionTrace> activeTrace = new ThreadLocal<>();
 
@@ -63,7 +63,7 @@ public class CoordinatorAgentTools {
             BacktestAgent backtestAgent,
             SynthesisAgent synthesisAgent,
             ExternalDataCache externalDataCache,
-            ChatProgressPublisher progressPublisher
+            WorkflowProgress workflowProgress
     ) {
         this(
                 marketDataAgent,
@@ -73,7 +73,7 @@ public class CoordinatorAgentTools {
                 backtestAgent,
                 synthesisAgent,
                 externalDataCache,
-                progressPublisher,
+                workflowProgress,
                 null
         );
     }
@@ -87,7 +87,7 @@ public class CoordinatorAgentTools {
             BacktestAgent backtestAgent,
             SynthesisAgent synthesisAgent,
             ExternalDataCache externalDataCache,
-            ChatProgressPublisher progressPublisher,
+            WorkflowProgress workflowProgress,
             WorkflowApprovalService approvalService
     ) {
         this.marketDataAgent = marketDataAgent;
@@ -97,7 +97,7 @@ public class CoordinatorAgentTools {
         this.backtestAgent = backtestAgent;
         this.synthesisAgent = synthesisAgent;
         this.externalDataCache = externalDataCache;
-        this.progressPublisher = progressPublisher;
+        this.workflowProgress = workflowProgress;
         this.approvalService = approvalService;
     }
 
@@ -452,12 +452,12 @@ public class CoordinatorAgentTools {
                 ticker,
                 agentActorName(agentType)
         );
-        progressPublisher.running(
+        workflowProgress.running(
                 agentStepId(agentType, ticker),
                 agentProgressLabel(agentType, ticker),
-                ChatProgressPublisher.KIND_AGENT,
+                WorkflowProgress.KIND_AGENT,
                 summary,
-                ChatProgressPublisher.ACTOR_TYPE_SUB_AGENT,
+                WorkflowProgress.ACTOR_TYPE_SUB_AGENT,
                 agentActorName(agentType),
                 ChatProgressMetadata.input(agentInputPayload(agentType, ticker))
         );
@@ -480,15 +480,15 @@ public class CoordinatorAgentTools {
                 tokenUsage,
                 dataAccesses == null ? 0 : dataAccesses.size()
         );
-        progressPublisher.completed(
+        workflowProgress.completed(
                 agentStepId(agentType, ticker),
                 agentProgressLabel(agentType, ticker),
-                ChatProgressPublisher.KIND_AGENT,
+                WorkflowProgress.KIND_AGENT,
                 durationMs,
                 summary,
                 tokenUsage,
                 dataAccesses,
-                ChatProgressPublisher.ACTOR_TYPE_SUB_AGENT,
+                WorkflowProgress.ACTOR_TYPE_SUB_AGENT,
                 agentActorName(agentType),
                 ChatProgressMetadata.payload(agentInputPayload(agentType, ticker), summary)
         );
@@ -503,13 +503,13 @@ public class CoordinatorAgentTools {
                 durationMs,
                 summary
         );
-        progressPublisher.failed(
+        workflowProgress.failed(
                 agentStepId(agentType, ticker),
                 agentProgressLabel(agentType, ticker),
-                ChatProgressPublisher.KIND_AGENT,
+                WorkflowProgress.KIND_AGENT,
                 durationMs,
                 summary,
-                ChatProgressPublisher.ACTOR_TYPE_SUB_AGENT,
+                WorkflowProgress.ACTOR_TYPE_SUB_AGENT,
                 agentActorName(agentType),
                 ChatProgressMetadata.input(agentInputPayload(agentType, ticker))
         );

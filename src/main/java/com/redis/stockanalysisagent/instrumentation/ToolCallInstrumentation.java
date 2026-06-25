@@ -1,8 +1,8 @@
 package com.redis.stockanalysisagent.instrumentation;
 
 import com.redis.stockanalysisagent.chat.ChatProgressMetadata;
-import com.redis.stockanalysisagent.chat.ChatProgressPublisher;
-import com.redis.stockanalysisagent.workflow.ApprovalRequiredException;
+import com.redis.stockanalysisagent.chat.WorkflowProgress;
+import com.redis.stockanalysisagent.workflow.approval.ApprovalRequiredException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ToolContext;
@@ -35,11 +35,11 @@ public class ToolCallInstrumentation {
     private static final HexFormat HEX_FORMAT = HexFormat.of();
     private static final int MAX_SUMMARY_FIELDS = 6;
 
-    private final ChatProgressPublisher progressPublisher;
+    private final WorkflowProgress workflowProgress;
     private final AtomicLong invocationSequence = new AtomicLong();
 
-    public ToolCallInstrumentation(ChatProgressPublisher progressPublisher) {
-        this.progressPublisher = progressPublisher;
+    public ToolCallInstrumentation(WorkflowProgress workflowProgress) {
+        this.workflowProgress = workflowProgress;
     }
 
     public Object[] callbacks(String actorType, String actorName, Object toolObject) {
@@ -101,10 +101,10 @@ public class ToolCallInstrumentation {
                     inputBytes
             );
 
-            progressPublisher.running(
+            workflowProgress.running(
                     stepId,
                     label,
-                    ChatProgressPublisher.KIND_SYSTEM,
+                    WorkflowProgress.KIND_SYSTEM,
                     "Calling tool " + toolName + summarySuffix + ".",
                     actorType,
                     actorName,
@@ -123,10 +123,10 @@ public class ToolCallInstrumentation {
                         durationMs,
                         sizeBytes(result)
                 );
-                progressPublisher.completed(
+                workflowProgress.completed(
                         stepId,
                         label,
-                        ChatProgressPublisher.KIND_SYSTEM,
+                        WorkflowProgress.KIND_SYSTEM,
                         durationMs,
                         "Completed tool " + toolName + summarySuffix + ".",
                         actorType,
@@ -147,10 +147,10 @@ public class ToolCallInstrumentation {
                             durationMs,
                             approvalRequired.approval().approvalId()
                     );
-                    progressPublisher.completed(
+                    workflowProgress.completed(
                             stepId,
                             label,
-                            ChatProgressPublisher.KIND_SYSTEM,
+                            WorkflowProgress.KIND_SYSTEM,
                             durationMs,
                             "Paused tool " + toolName + summarySuffix + " until approval.",
                             actorType,
@@ -169,10 +169,10 @@ public class ToolCallInstrumentation {
                         rootCauseType(ex),
                         ex
                 );
-                progressPublisher.failed(
+                workflowProgress.failed(
                         stepId,
                         label,
-                        ChatProgressPublisher.KIND_SYSTEM,
+                        WorkflowProgress.KIND_SYSTEM,
                         durationMs,
                         "Failed tool " + toolName + summarySuffix + ": " + rootCauseType(ex) + ".",
                         actorType,

@@ -702,6 +702,7 @@ body::before {
     flex: 0 0 auto;
     max-width: 100%;
     overflow: hidden;
+    background: transparent;
     border: 1px solid var(--color-border-light);
     border-radius: 999px;
     color: var(--color-text-secondary);
@@ -712,6 +713,22 @@ body::before {
     text-overflow: ellipsis;
     text-transform: uppercase;
     white-space: nowrap;
+}
+
+button.circuit-provider__state {
+    appearance: none;
+    cursor: pointer;
+    margin: 0;
+}
+
+button.circuit-provider__state:disabled {
+    cursor: wait;
+    opacity: 0.65;
+}
+
+button.circuit-provider__state:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
 }
 
 .circuit-provider__state--closed {
@@ -1890,6 +1907,13 @@ body::before {
     background: rgba(251, 191, 36, 0.12);
     border-color: rgba(251, 191, 36, 0.26);
     color: var(--color-warning);
+}
+
+.badge--workflow {
+    background: rgba(99, 102, 241, 0.12);
+    border-color: rgba(129, 140, 248, 0.34);
+    color: #c7d2fe;
+    font-family: var(--font-family-mono);
 }
 
 .badge--timing {

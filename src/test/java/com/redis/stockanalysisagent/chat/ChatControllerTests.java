@@ -5,7 +5,7 @@ import com.redis.stockanalysisagent.session.ChatSessionAccess;
 import com.redis.stockanalysisagent.session.controller.ChatSessionController;
 import com.redis.stockanalysisagent.session.ChatSessionService;
 import com.redis.stockanalysisagent.session.controller.vo.LoginRequest;
-import com.redis.stockanalysisagent.workflow.WorkflowEventService;
+import com.redis.stockanalysisagent.workflow.events.WorkflowEventService;
 import com.redis.stockanalysisagent.workflow.WorkflowStatus;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -20,7 +20,6 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -29,18 +28,18 @@ import static org.mockito.Mockito.when;
 class ChatControllerTests {
 
     private final ChatService chatService = mock(ChatService.class);
-    private final ChatProgressPublisher progressPublisher = mock(ChatProgressPublisher.class);
+    private final WorkflowProgress workflowProgress = mock(WorkflowProgress.class);
     private final ChatSessionService chatSessionService = mock(ChatSessionService.class);
     private final ChatSessionAccess sessionAccess = new ChatSessionAccess(true);
-    private final ChatController controller = new ChatController(chatService, sessionAccess, progressPublisher);
+    private final ChatController controller = new ChatController(chatService, sessionAccess, workflowProgress);
     private final ChatSessionController sessionController = new ChatSessionController(chatSessionService, sessionAccess);
 
     @Test
     void chatUsesSessionUserAndSessionRetrievedMemoriesLimit() {
         MockHttpServletRequest request = new MockHttpServletRequest();
         sessionController.login(new LoginRequest("alice", 6, null, null, null, null, null), request);
-        when(chatService.chat(eq("alice"), eq("session-1"), eq("hello"), isNull(), eq(6), eq(true), eq(true), eq(List.of())))
-                .thenReturn(chatTurn("alice:session-1"));
+        ChatService.ChatRunRequest chatRequest = chatRunRequest("alice", "session-1", "hello", null, 6, true, true);
+        when(chatService.run(eq(chatRequest))).thenReturn(chatTurn("alice:session-1"));
 
         ChatResponse response = controller.chat(new ChatRequest("session-1", " hello ", null, null, null, null, null, null, null), request).getBody();
 
@@ -53,15 +52,15 @@ class ChatControllerTests {
         assertThat(response.rateLimitingEnabled()).isTrue();
         assertThat(response.requireApprovalEnabled()).isFalse();
         assertThat(response.approvalRequiredTools()).isEmpty();
-        verify(chatService).chat("alice", "session-1", "hello", null, 6, true, true, List.of());
+        verify(chatService).run(chatRequest);
     }
 
     @Test
     void chatPassesClientRequestIdAndReturnsWorkflowFields() {
         MockHttpServletRequest request = new MockHttpServletRequest();
         sessionController.login(new LoginRequest("alice", 6, null, null, null, null, null), request);
-        when(chatService.chat(eq("alice"), eq("session-1"), eq("hello"), eq("client-1"), eq(6), eq(true), eq(true), eq(List.of())))
-                .thenReturn(chatTurn("alice:session-1", "workflow-1", WorkflowStatus.COMPLETED));
+        ChatService.ChatRunRequest chatRequest = chatRunRequest("alice", "session-1", "hello", "client-1", 6, true, true);
+        when(chatService.run(eq(chatRequest))).thenReturn(chatTurn("alice:session-1", "workflow-1", WorkflowStatus.COMPLETED));
 
         ChatResponse response = controller.chat(
                 new ChatRequest("session-1", "hello", null, null, null, null, null, null, " client-1 "),
@@ -71,7 +70,7 @@ class ChatControllerTests {
         assertThat(response).isNotNull();
         assertThat(response.workflowId()).isEqualTo("workflow-1");
         assertThat(response.workflowStatus()).isEqualTo(WorkflowStatus.COMPLETED);
-        verify(chatService).chat("alice", "session-1", "hello", "client-1", 6, true, true, List.of());
+        verify(chatService).run(chatRequest);
     }
 
     @Test
@@ -87,13 +86,13 @@ class ChatControllerTests {
         ChatController disabledController = new ChatController(
                 chatService,
                 disabledAccess,
-                progressPublisher
+                workflowProgress
         );
         ChatSessionController disabledSessionController = new ChatSessionController(chatSessionService, disabledAccess);
         MockHttpServletRequest request = new MockHttpServletRequest();
         disabledSessionController.login(new LoginRequest("alice", 7, null, null, null, null, null), request);
-        when(chatService.chat(eq("alice"), eq("session-1"), eq("hello"), isNull(), eq(4), eq(false), eq(false), eq(List.of())))
-                .thenReturn(chatTurn("alice:session-1"));
+        ChatService.ChatRunRequest chatRequest = chatRunRequest("alice", "session-1", "hello", null, 4, false, false);
+        when(chatService.run(eq(chatRequest))).thenReturn(chatTurn("alice:session-1"));
 
         ChatResponse response = disabledController.chat(new ChatRequest("session-1", "hello", 4, false, false, false, false, null, null), request).getBody();
 
@@ -105,32 +104,32 @@ class ChatControllerTests {
         assertThat(response.rateLimitingEnabled()).isFalse();
         assertThat(response.requireApprovalEnabled()).isFalse();
         assertThat(response.approvalRequiredTools()).isEmpty();
-        verify(chatService).chat("alice", "session-1", "hello", null, 4, false, false, List.of());
+        verify(chatService).run(chatRequest);
     }
 
     @Test
     void chatStreamWritesProgressAndFinalResponse() throws Exception {
-        ChatProgressPublisher realProgressPublisher = new ChatProgressPublisher(mock(WorkflowEventService.class));
-        ChatController streamingController = new ChatController(chatService, sessionAccess, realProgressPublisher);
+        WorkflowProgress realWorkflowProgress = new WorkflowProgress(mock(WorkflowEventService.class));
+        ChatController streamingController = new ChatController(chatService, sessionAccess, realWorkflowProgress);
         MockHttpServletRequest request = new MockHttpServletRequest();
         sessionController.login(new LoginRequest("alice", 7, null, null, null, null, null), request);
         doAnswer(invocation -> {
-            realProgressPublisher.running(
+            realWorkflowProgress.running(
                     "TEST_STEP",
                     "Test step",
-                    ChatProgressPublisher.KIND_SYSTEM,
+                    WorkflowProgress.KIND_SYSTEM,
                     "Testing progress."
             );
-            realProgressPublisher.completed(
+            realWorkflowProgress.completed(
                     "TEST_STEP",
                     "Test step",
-                    ChatProgressPublisher.KIND_SYSTEM,
+                    WorkflowProgress.KIND_SYSTEM,
                     25,
                     "Tested progress.",
                     new TokenUsageSummary(10, 5, 15)
             );
             return chatTurn("alice:session-1");
-        }).when(chatService).chat("alice", "session-1", "hello", null, 7, true, true, List.of());
+        }).when(chatService).run(chatRunRequest("alice", "session-1", "hello", null, 7, true, true));
 
         StreamingResponseBody body = streamingController.chatStream(
                 new ChatRequest("session-1", "hello", null, null, null, null, null, null, null),
@@ -152,6 +151,32 @@ class ChatControllerTests {
 
     private ChatService.ChatTurn chatTurn(String conversationId) {
         return chatTurn(conversationId, null, null);
+    }
+
+    private ChatService.ChatRunRequest chatRunRequest(
+            String userId,
+            String sessionId,
+            String message,
+            String clientRequestId,
+            int retrievedMemoriesLimit,
+            boolean apiCachingEnabled,
+            boolean semanticCachingEnabled
+    ) {
+        return new ChatService.ChatRunRequest(
+                userId,
+                sessionId,
+                message,
+                clientRequestId,
+                retrievedMemoriesLimit,
+                apiCachingEnabled,
+                semanticCachingEnabled,
+                List.of(),
+                "chat",
+                null,
+                null,
+                true,
+                null
+        );
     }
 
     private ChatService.ChatTurn chatTurn(String conversationId, String workflowId, WorkflowStatus workflowStatus) {

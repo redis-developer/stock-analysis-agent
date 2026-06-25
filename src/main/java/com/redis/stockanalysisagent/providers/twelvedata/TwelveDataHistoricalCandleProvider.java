@@ -1,7 +1,7 @@
 package com.redis.stockanalysisagent.providers.twelvedata;
 
 import com.redis.stockanalysisagent.providers.HistoricalCandleProvider;
-import com.redis.stockanalysisagent.reliability.CircuitBreakerService;
+import com.redis.stockanalysisagent.reliability.circuitbreaker.CircuitBreakerService;
 import com.redis.stockanalysisagent.stock.HistoricalCandle;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;

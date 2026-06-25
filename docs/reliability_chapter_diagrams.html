@@ -1,0 +1,1126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Redis Reliability Chapters</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            --bg: #0d1017;
+            --slide: #111720;
+            --panel: #182130;
+            --panel-2: #202b3b;
+            --line: #415067;
+            --text: #f5f7fb;
+            --muted: #aeb8c9;
+            --muted-2: #7f8ba0;
+            --redis: #ff4438;
+            --green: #45d483;
+            --blue: #7aa8ff;
+            --cyan: #66d9ef;
+            --amber: #f7c85f;
+            --purple: #b79cff;
+            --danger: #ff6f7b;
+            --ink: #0f141c;
+            font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background: radial-gradient(circle at 10% 0%, rgba(255, 68, 56, 0.18), transparent 32rem), var(--bg);
+            color: var(--text);
+        }
+
+        .deck {
+            display: grid;
+            justify-items: center;
+            gap: 36px;
+            padding: 28px 0 56px;
+        }
+
+        .deck-nav {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            padding: 12px 18px;
+            background: rgba(13, 16, 23, 0.86);
+            backdrop-filter: blur(16px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .deck-nav-inner {
+            width: min(1280px, calc(100vw - 40px));
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 20px;
+        }
+
+        .brand {
+            color: var(--redis);
+            font-weight: 950;
+            font-size: 28px;
+            line-height: 1;
+        }
+
+        .deck-title {
+            color: var(--muted);
+            font-size: 14px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+
+        .slide-shell {
+            width: var(--shell-width, 1280px);
+            height: var(--shell-height, 720px);
+            position: relative;
+        }
+
+        .slide {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 1280px;
+            height: 720px;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 18px;
+            background:
+                linear-gradient(135deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.012)),
+                var(--slide);
+            box-shadow: 0 26px 90px rgba(0, 0, 0, 0.38);
+            transform: scale(var(--slide-scale, 1));
+            transform-origin: top left;
+        }
+
+        .slide::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background:
+                linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+            background-size: 42px 42px;
+            mask-image: linear-gradient(90deg, transparent, black 14%, black 86%, transparent);
+            pointer-events: none;
+        }
+
+        .slide-left {
+            position: absolute;
+            left: 46px;
+            top: 46px;
+            width: 342px;
+            height: 628px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            gap: 20px;
+            z-index: 1;
+        }
+
+        .slide-right {
+            position: absolute;
+            right: 46px;
+            top: 46px;
+            width: 828px;
+            height: 628px;
+            z-index: 1;
+        }
+
+        .chapter {
+            color: var(--redis);
+            font-size: 15px;
+            font-weight: 950;
+            letter-spacing: 0.15em;
+            text-transform: uppercase;
+        }
+
+        h1,
+        h2 {
+            margin: 0;
+            letter-spacing: 0;
+        }
+
+        h1 {
+            margin-top: 20px;
+            max-width: 920px;
+            font-size: 76px;
+            line-height: 0.95;
+            font-weight: 950;
+        }
+
+        h2 {
+            margin-top: 16px;
+            font-size: 46px;
+            line-height: 1.02;
+            font-weight: 920;
+        }
+
+        .lead {
+            margin: 26px 0 0;
+            width: 760px;
+            color: var(--muted);
+            font-size: 24px;
+            line-height: 1.4;
+            font-weight: 560;
+        }
+
+        .question {
+            margin-top: 24px;
+            padding: 18px 18px 20px;
+            border: 1px solid rgba(102, 217, 239, 0.36);
+            border-radius: 14px;
+            background: rgba(102, 217, 239, 0.08);
+            color: #dbfbff;
+            font-size: 21px;
+            line-height: 1.32;
+            font-weight: 820;
+        }
+
+        .impl {
+            display: grid;
+            gap: 12px;
+        }
+
+        .label {
+            color: var(--muted-2);
+            font-size: 13px;
+            font-weight: 900;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+        }
+
+        .impl-name {
+            color: var(--text);
+            font-size: 26px;
+            line-height: 1.12;
+            font-weight: 900;
+        }
+
+        .notes {
+            display: grid;
+            gap: 12px;
+            margin: 0;
+            padding: 0;
+            list-style: none;
+            color: var(--muted);
+            font-size: 17px;
+            line-height: 1.38;
+        }
+
+        .notes li {
+            position: relative;
+            padding-left: 18px;
+        }
+
+        .notes li::before {
+            content: "";
+            position: absolute;
+            left: 0;
+            top: 0.65em;
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: var(--redis);
+        }
+
+        .diagram {
+            position: relative;
+            height: 100%;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 16px;
+            background:
+                radial-gradient(circle at 82% 16%, rgba(102, 217, 239, 0.11), transparent 18rem),
+                #101722;
+            overflow: hidden;
+        }
+
+        .diagram-title {
+            position: absolute;
+            left: 30px;
+            top: 28px;
+            color: var(--text);
+            font-size: 22px;
+            font-weight: 900;
+            z-index: 2;
+        }
+
+        svg {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        .node {
+            fill: #1e2838;
+            stroke: #4a5970;
+            stroke-width: 2;
+        }
+
+        .node.redis {
+            fill: rgba(255, 68, 56, 0.13);
+            stroke: rgba(255, 68, 56, 0.9);
+        }
+
+        .node.good {
+            fill: rgba(69, 212, 131, 0.13);
+            stroke: rgba(69, 212, 131, 0.86);
+        }
+
+        .node.wait {
+            fill: rgba(247, 200, 95, 0.14);
+            stroke: rgba(247, 200, 95, 0.86);
+        }
+
+        .node.blue {
+            fill: rgba(122, 168, 255, 0.13);
+            stroke: rgba(122, 168, 255, 0.86);
+        }
+
+        .node.purple {
+            fill: rgba(183, 156, 255, 0.13);
+            stroke: rgba(183, 156, 255, 0.86);
+        }
+
+        .node.danger {
+            fill: rgba(255, 111, 123, 0.13);
+            stroke: rgba(255, 111, 123, 0.86);
+        }
+
+        .compare-frame {
+            fill: rgba(255, 255, 255, 0.035);
+            stroke-width: 2;
+        }
+
+        .compare-frame.bad {
+            stroke: rgba(255, 111, 123, 0.92);
+        }
+
+        .compare-frame.good {
+            stroke: rgba(69, 212, 131, 0.92);
+        }
+
+        .compare-inner {
+            fill: rgba(13, 16, 23, 0.55);
+            stroke: rgba(255, 255, 255, 0.16);
+            stroke-width: 2;
+        }
+
+        .txt {
+            fill: var(--text);
+            font-size: 20px;
+            font-weight: 860;
+        }
+
+        .small {
+            fill: var(--muted);
+            font-size: 15px;
+            font-weight: 720;
+        }
+
+        .code-text {
+            fill: #d7deeb;
+            font-family: "SFMono-Regular", Consolas, monospace;
+            font-size: 14px;
+            font-weight: 650;
+        }
+
+        .panel-title-text {
+            fill: var(--text);
+            font-size: 16px;
+            font-weight: 920;
+            letter-spacing: 0.04em;
+        }
+
+        .mini-text {
+            fill: var(--text);
+            font-size: 13px;
+            font-weight: 820;
+        }
+
+        .tiny-text {
+            fill: var(--muted);
+            font-size: 12px;
+            font-weight: 720;
+        }
+
+        .redis-word {
+            fill: var(--redis);
+            font-size: 44px;
+            font-weight: 950;
+            font-style: italic;
+        }
+
+        .line {
+            stroke: #8794a8;
+            stroke-width: 4;
+            fill: none;
+            marker-end: url(#arrow);
+        }
+
+        .line.redis {
+            stroke: var(--redis);
+        }
+
+        .line.good {
+            stroke: var(--green);
+        }
+
+        .line.wait {
+            stroke: var(--amber);
+        }
+
+        .line.danger {
+            stroke: var(--danger);
+        }
+
+        .line.thin {
+            stroke-width: 2.5;
+        }
+
+        .dot {
+            fill: var(--cyan);
+            stroke: #101722;
+            stroke-width: 4;
+        }
+
+        .cover {
+            padding: 70px;
+        }
+
+        .cover h1 {
+            max-width: 735px;
+            font-size: 68px;
+        }
+
+        .cover .lead {
+            width: 700px;
+            font-size: 22px;
+        }
+
+        .cover-grid {
+            position: absolute;
+            right: 70px;
+            top: 84px;
+            width: 365px;
+            display: grid;
+            gap: 14px;
+        }
+
+        .cover-card {
+            padding: 18px 20px;
+            border: 1px solid rgba(255, 255, 255, 0.13);
+            border-radius: 14px;
+            background: rgba(255, 255, 255, 0.055);
+        }
+
+        .cover-card strong {
+            display: block;
+            margin-bottom: 5px;
+            color: var(--text);
+            font-size: 20px;
+        }
+
+        .cover-card span {
+            color: var(--muted);
+            font-size: 15px;
+            line-height: 1.35;
+        }
+
+        .footer {
+            position: absolute;
+            left: 46px;
+            bottom: 28px;
+            right: 46px;
+            display: flex;
+            justify-content: space-between;
+            color: var(--muted-2);
+            font-size: 13px;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        @media (max-width: 760px) {
+            body {
+                background: var(--bg);
+            }
+
+            .deck {
+                gap: 18px;
+                padding: 18px 10px 34px;
+            }
+
+            .deck-nav {
+                padding: 12px 14px;
+            }
+
+            .deck-nav-inner {
+                width: 100%;
+                align-items: flex-start;
+                flex-direction: column;
+                gap: 8px;
+            }
+
+            .brand {
+                font-size: 26px;
+            }
+
+            .deck-title {
+                font-size: 12px;
+                line-height: 1.25;
+            }
+
+            .slide-shell {
+                width: 100% !important;
+                height: auto !important;
+            }
+
+            .slide {
+                position: relative;
+                width: 100%;
+                height: auto;
+                min-height: 0;
+                padding: 24px;
+                overflow: visible;
+                border-radius: 14px;
+                transform: none !important;
+                box-shadow: 0 14px 42px rgba(0, 0, 0, 0.34);
+            }
+
+            .slide::before {
+                display: none;
+            }
+
+            .slide-left,
+            .slide-right {
+                position: relative;
+                left: auto;
+                right: auto;
+                top: auto;
+                width: 100%;
+                height: auto;
+            }
+
+            .slide-left {
+                gap: 22px;
+                margin-bottom: 22px;
+            }
+
+            .chapter {
+                font-size: 11px;
+            }
+
+            h1 {
+                max-width: none;
+                margin-top: 14px;
+                font-size: 38px;
+                line-height: 1.02;
+            }
+
+            h2 {
+                margin-top: 12px;
+                font-size: 31px;
+                line-height: 1.06;
+            }
+
+            .lead {
+                width: auto;
+                margin-top: 18px;
+                font-size: 16px;
+                line-height: 1.45;
+            }
+
+            .question {
+                margin-top: 18px;
+                padding: 14px 15px;
+                border-radius: 12px;
+                font-size: 15px;
+                line-height: 1.35;
+            }
+
+            .impl-name {
+                font-size: 20px;
+            }
+
+            .notes {
+                gap: 9px;
+                font-size: 14px;
+            }
+
+            .diagram {
+                height: 390px;
+                border-radius: 13px;
+            }
+
+            .diagram-title {
+                left: 18px;
+                top: 18px;
+                right: 18px;
+                font-size: 15px;
+                line-height: 1.25;
+            }
+
+            .txt {
+                font-size: 22px;
+            }
+
+            .small {
+                font-size: 17px;
+            }
+
+            .code-text {
+                font-size: 17px;
+            }
+
+            .cover {
+                padding: 24px;
+            }
+
+            .cover-grid {
+                position: relative;
+                right: auto;
+                top: auto;
+                width: 100%;
+                margin-top: 24px;
+                gap: 10px;
+            }
+
+            .cover-card {
+                padding: 14px 15px;
+                border-radius: 12px;
+            }
+
+            .cover-card strong {
+                font-size: 17px;
+            }
+
+            .cover-card span {
+                font-size: 13px;
+            }
+
+            .footer {
+                position: relative;
+                left: auto;
+                right: auto;
+                bottom: auto;
+                margin-top: 22px;
+                gap: 14px;
+                font-size: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+<nav class="deck-nav" aria-label="Deck navigation">
+    <div class="deck-nav-inner">
+        <div class="brand">Redis</div>
+        <div class="deck-title">Reliability chapters for agentic applications</div>
+    </div>
+</nav>
+
+<main class="deck">
+    <div class="slide-shell">
+        <section class="slide cover" aria-label="Title slide">
+            <div class="chapter">Redis 8 demo story</div>
+            <h1>Reliability patterns for agentic applications</h1>
+            <p class="lead">The stock analysis chatbot becomes a durable workflow. Redis stores the state required to observe, recover, coordinate, and resume agent work.</p>
+            <div class="cover-grid">
+                <div class="cover-card"><strong>Durable state</strong><span>Workflow hashes, status, TTL leases, and session links.</span></div>
+                <div class="cover-card"><strong>Replayable history</strong><span>Streams capture what the agent did and what it saw.</span></div>
+                <div class="cover-card"><strong>Coordinated recovery</strong><span>Locks, idempotency, queues, and checkpoints keep replicas safe.</span></div>
+                <div class="cover-card"><strong>Controlled execution</strong><span>Circuit breakers, semaphores, DLQs, and human approval.</span></div>
+            </div>
+            <div class="footer"><span>Stock analysis agent</span><span>Redis reliability story</span></div>
+        </section>
+    </div>
+
+    <div class="slide-shell">
+        <section class="slide" aria-label="Chapter 1">
+            <div class="slide-left">
+                <div>
+                    <div class="chapter">Chapter 1</div>
+                    <h2>A chat request becomes a workflow</h2>
+                    <div class="question">What if we need to observe, debug, or recover one chat request after it leaves the HTTP handler?</div>
+                </div>
+                <div class="impl">
+                    <div class="label">Implementation</div>
+                    <div class="impl-name">Workflow identity</div>
+                    <ul class="notes">
+                        <li>Create a workflow id before the agent starts.</li>
+                        <li>Store user, session, status, owner, attempt, and timestamps.</li>
+                        <li>Connect events, checkpoints, Grafana, and UI progress to the same id.</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="slide-right">
+                <div class="diagram">
+                    <div class="diagram-title">Workflow identity turns a request into a durable unit</div>
+                    <svg viewBox="0 0 828 628" aria-hidden="true">
+                        <defs><marker id="arrow" markerWidth="12" markerHeight="12" refX="9" refY="4" orient="auto"><path d="M0,0 L0,8 L11,4 z" fill="#8794a8"/></marker></defs>
+                        <rect x="34" y="88" width="362" height="470" rx="18" class="compare-frame bad"/>
+                        <text x="58" y="126" class="panel-title-text">WITHOUT WORKFLOW IDENTITY</text>
+                        <rect x="56" y="150" width="318" height="376" rx="18" class="compare-inner"/>
+
+                        <rect x="100" y="184" width="228" height="38" rx="9" class="node"/>
+                        <text x="126" y="208" class="mini-text">User asks for analysis</text>
+                        <path d="M214 222 L214 252" class="line thin"/>
+                        <rect x="100" y="252" width="228" height="38" rx="9" class="node"/>
+                        <text x="140" y="276" class="mini-text">HTTP handler</text>
+                        <path d="M214 290 L214 320" class="line thin"/>
+                        <rect x="100" y="320" width="228" height="44" rx="9" class="node danger"/>
+                        <text x="134" y="346" class="mini-text">Agent still running</text>
+                        <path d="M214 364 L214 394" class="line thin danger"/>
+                        <rect x="100" y="394" width="228" height="44" rx="9" class="node danger"/>
+                        <text x="130" y="420" class="mini-text">Process crashes</text>
+                        <path d="M214 438 L214 468" class="line thin danger"/>
+                        <rect x="100" y="468" width="228" height="34" rx="9" class="node"/>
+                        <text x="132" y="490" class="tiny-text">No durable handle to recover</text>
+
+                        <rect x="432" y="88" width="362" height="470" rx="18" class="compare-frame good"/>
+                        <text x="456" y="126" class="panel-title-text">WITH WORKFLOW IDENTITY</text>
+                        <rect x="454" y="150" width="318" height="376" rx="18" class="compare-inner"/>
+
+                        <rect x="498" y="184" width="228" height="38" rx="9" class="node"/>
+                        <text x="524" y="208" class="mini-text">User asks for analysis</text>
+                        <path d="M612 222 L612 252" class="line thin"/>
+                        <rect x="498" y="252" width="228" height="38" rx="9" class="node good"/>
+                        <text x="532" y="276" class="mini-text">Create workflowId</text>
+                        <path d="M612 290 L612 316" class="line thin redis"/>
+                        <text x="548" y="338" class="redis-word">Redis</text>
+                        <rect x="496" y="354" width="232" height="72" rx="11" class="node redis"/>
+                        <text x="522" y="384" class="code-text">workflow:{id}</text>
+                        <text x="522" y="410" class="tiny-text">status, owner, attempt</text>
+                        <path d="M612 426 L612 458" class="line thin good"/>
+                        <rect x="498" y="458" width="228" height="44" rx="9" class="node good"/>
+                        <text x="526" y="486" class="tiny-text">Trace, debug, recover by id</text>
+                    </svg>
+                </div>
+            </div>
+            <div class="footer"><span>Workflow identity</span><span>01</span></div>
+        </section>
+    </div>
+
+    <div class="slide-shell">
+        <section class="slide" aria-label="Chapter 2">
+            <div class="slide-left">
+                <div>
+                    <div class="chapter">Chapter 2</div>
+                    <h2>The workflow becomes visible</h2>
+                    <div class="question">What if we need to see what the agent actually did?</div>
+                </div>
+                <div class="impl">
+                    <div class="label">Implementation</div>
+                    <div class="impl-name">Redis Streams event log</div>
+                    <ul class="notes">
+                        <li>Append ordered events for every agent step.</li>
+                        <li>Store actor, arguments, results, payloads, and timing.</li>
+                        <li>Use the same stream for UI and Grafana inspection.</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="slide-right">
+                <div class="diagram">
+                    <div class="diagram-title">The agent writes an ordered event stream</div>
+                    <svg viewBox="0 0 828 628" aria-hidden="true">
+                        <defs><marker id="arrow" markerWidth="12" markerHeight="12" refX="9" refY="4" orient="auto"><path d="M0,0 L0,8 L11,4 z" fill="#8794a8"/></marker></defs>
+                        <path d="M94 312 L728 312" stroke="#66d9ef" stroke-width="7" stroke-linecap="round"/>
+                        <circle cx="136" cy="312" r="15" class="dot"/><circle cx="254" cy="312" r="15" class="dot"/><circle cx="372" cy="312" r="15" class="dot"/><circle cx="490" cy="312" r="15" class="dot"/><circle cx="608" cy="312" r="15" class="dot"/><circle cx="706" cy="312" r="15" class="dot"/>
+                        <text x="110" y="260" class="small">start</text><text x="226" y="260" class="small">memory</text><text x="336" y="260" class="small">tool call</text><text x="452" y="260" class="small">tool result</text><text x="580" y="260" class="small">agent</text><text x="668" y="260" class="small">done</text>
+                        <rect x="116" y="424" width="596" height="92" rx="14" class="node redis"/>
+                        <text x="154" y="466" class="txt">Redis stream</text>
+                        <text x="154" y="494" class="code-text">stock-analysis:workflows:{workflowId}:events</text>
+                        <path d="M414 424 L414 330" class="line redis"/>
+                    </svg>
+                </div>
+            </div>
+            <div class="footer"><span>Redis Streams event log</span><span>02</span></div>
+        </section>
+    </div>
+
+    <div class="slide-shell">
+        <section class="slide" aria-label="Chapter 3">
+            <div class="slide-left">
+                <div>
+                    <div class="chapter">Chapter 3</div>
+                    <h2>Completed work becomes reusable</h2>
+                    <div class="question">What if the agent finishes a valuable step and fails later?</div>
+                </div>
+                <div class="impl">
+                    <div class="label">Implementation</div>
+                    <div class="impl-name">Checkpoints</div>
+                    <ul class="notes">
+                        <li>Promote completed steps to replay points.</li>
+                        <li>Store input, output, actor, step id, and summary.</li>
+                        <li>Keep checkpoints separate from the full event log.</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="slide-right">
+                <div class="diagram">
+                    <div class="diagram-title">Completed payloads become resume points</div>
+                    <svg viewBox="0 0 828 628" aria-hidden="true">
+                        <defs><marker id="arrow" markerWidth="12" markerHeight="12" refX="9" refY="4" orient="auto"><path d="M0,0 L0,8 L11,4 z" fill="#8794a8"/></marker></defs>
+                        <rect x="80" y="166" width="178" height="102" rx="14" class="node"/>
+                        <text x="116" y="208" class="txt">Running</text><text x="116" y="236" class="small">not safe yet</text>
+                        <path d="M258 217 L354 217" class="line"/>
+                        <rect x="354" y="166" width="178" height="102" rx="14" class="node good"/>
+                        <text x="390" y="208" class="txt">Completed</text><text x="390" y="236" class="small">payload present</text>
+                        <path d="M532 217 L626 217" class="line redis"/>
+                        <rect x="626" y="140" width="150" height="154" rx="14" class="node redis"/>
+                        <text x="654" y="188" class="txt">Checkpoint</text><text x="654" y="216" class="small">safe resume</text><text x="654" y="244" class="small">input plus output</text>
+                        <rect x="138" y="410" width="552" height="92" rx="14" class="node"/>
+                        <text x="176" y="454" class="code-text">stock-analysis:workflows:{id}:checkpoints</text>
+                    </svg>
+                </div>
+            </div>
+            <div class="footer"><span>Checkpoints</span><span>03</span></div>
+        </section>
+    </div>
+
+    <div class="slide-shell">
+        <section class="slide" aria-label="Chapter 4">
+            <div class="slide-left">
+                <div>
+                    <div class="chapter">Chapter 4</div>
+                    <h2>Recovery starts from the last checkpoint</h2>
+                    <div class="question">What if the process crashes after expensive work already happened?</div>
+                </div>
+                <div class="impl">
+                    <div class="label">Implementation</div>
+                    <div class="impl-name">Checkpoint replay</div>
+                    <ul class="notes">
+                        <li>Read the latest checkpoint and later events.</li>
+                        <li>Send recovered evidence to the coordinator.</li>
+                        <li>Create a new workflow in the same conversation.</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="slide-right">
+                <div class="diagram">
+                    <div class="diagram-title">Replay continues from committed Redis context</div>
+                    <svg viewBox="0 0 828 628" aria-hidden="true">
+                        <defs><marker id="arrow" markerWidth="12" markerHeight="12" refX="9" refY="4" orient="auto"><path d="M0,0 L0,8 L11,4 z" fill="#8794a8"/></marker></defs>
+                        <rect x="70" y="150" width="176" height="106" rx="14" class="node danger"/>
+                        <text x="104" y="194" class="txt">Old workflow</text><text x="104" y="224" class="small">stopped</text>
+                        <path d="M246 203 L348 203" class="line redis"/>
+                        <rect x="348" y="128" width="184" height="150" rx="14" class="node redis"/>
+                        <text x="382" y="176" class="txt">Checkpoint</text><text x="382" y="206" class="small">recovered evidence</text><text x="382" y="234" class="small">tool outputs</text>
+                        <path d="M532 203 L632 203" class="line good"/>
+                        <rect x="632" y="150" width="136" height="106" rx="14" class="node good"/>
+                        <text x="658" y="194" class="txt">New run</text><text x="658" y="224" class="small">continues</text>
+                        <rect x="132" y="396" width="564" height="104" rx="14" class="node blue"/>
+                        <text x="170" y="438" class="txt">Coordinator context</text>
+                        <text x="170" y="468" class="small">original message plus recovered evidence plus replay instructions</text>
+                    </svg>
+                </div>
+            </div>
+            <div class="footer"><span>Checkpoint replay</span><span>04</span></div>
+        </section>
+    </div>
+
+    <div class="slide-shell">
+        <section class="slide" aria-label="Chapter 5">
+            <div class="slide-left">
+                <div>
+                    <div class="chapter">Chapter 5</div>
+                    <h2>Blocked work waits outside the chat request</h2>
+                    <div class="question">What if the agent reaches a red light and the browser should not wait?</div>
+                </div>
+                <div class="impl">
+                    <div class="label">Implementation</div>
+                    <div class="impl-name">Work queue</div>
+                    <ul class="notes">
+                        <li>Return to the user with a waiting state.</li>
+                        <li>Put the workflow id into Redis.</li>
+                        <li>Resume when capacity or provider health returns.</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="slide-right">
+                <div class="diagram">
+                    <div class="diagram-title">Blocked work moves out of the HTTP request</div>
+                    <svg viewBox="0 0 828 628" aria-hidden="true">
+                        <defs><marker id="arrow" markerWidth="12" markerHeight="12" refX="9" refY="4" orient="auto"><path d="M0,0 L0,8 L11,4 z" fill="#8794a8"/></marker></defs>
+                        <rect x="78" y="134" width="178" height="100" rx="14" class="node blue"/>
+                        <text x="112" y="178" class="txt">Agent step</text><text x="112" y="206" class="small">needs provider</text>
+                        <path d="M256 184 L362 184" class="line wait"/>
+                        <rect x="362" y="134" width="178" height="100" rx="14" class="node wait"/>
+                        <text x="396" y="178" class="txt">Red light</text><text x="396" y="206" class="small">no permit</text>
+                        <path d="M451 234 L451 340" class="line redis"/>
+                        <rect x="278" y="340" width="346" height="112" rx="14" class="node redis"/>
+                        <text x="316" y="386" class="txt">Redis queue</text><text x="316" y="416" class="small">workflow id waits outside chat request</text>
+                        <path d="M624 396 L718 396" class="line good"/>
+                        <rect x="718" y="350" width="82" height="92" rx="14" class="node good"/>
+                        <text x="742" y="400" class="txt">Run</text>
+                    </svg>
+                </div>
+            </div>
+            <div class="footer"><span>Work queue</span><span>05</span></div>
+        </section>
+    </div>
+
+    <div class="slide-shell">
+        <section class="slide" aria-label="Chapter 6">
+            <div class="slide-left">
+                <div>
+                    <div class="chapter">Chapter 6</div>
+                    <h2>Distributed workers process the queue safely</h2>
+                    <div class="question">What if two replicas pick up the same workflow?</div>
+                </div>
+                <div class="impl">
+                    <div class="label">Implementation</div>
+                    <div class="impl-name">Idempotent step execution and distributed locks</div>
+                    <ul class="notes">
+                        <li>Acquire a Redis lock before execution.</li>
+                        <li>Mark the original workflow hash as recovered.</li>
+                        <li>Duplicate workers read the recovered workflow id.</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="slide-right">
+                <div class="diagram">
+                    <div class="diagram-title">Only one worker executes a replay step</div>
+                    <svg viewBox="0 0 828 628" aria-hidden="true">
+                        <defs><marker id="arrow" markerWidth="12" markerHeight="12" refX="9" refY="4" orient="auto"><path d="M0,0 L0,8 L11,4 z" fill="#8794a8"/></marker></defs>
+                        <rect x="92" y="140" width="154" height="86" rx="14" class="node blue"/>
+                        <text x="126" y="190" class="txt">Worker A</text>
+                        <rect x="92" y="286" width="154" height="86" rx="14" class="node purple"/>
+                        <text x="126" y="336" class="txt">Worker B</text>
+                        <path d="M246 183 L372 248" class="line good"/>
+                        <path d="M246 329 L372 294" class="line danger"/>
+                        <rect x="372" y="214" width="200" height="116" rx="14" class="node redis"/>
+                        <text x="408" y="260" class="txt">Redis lock</text><text x="408" y="290" class="small">SET NX PX</text>
+                        <path d="M572 272 L690 272" class="line good"/>
+                        <rect x="690" y="226" width="88" height="92" rx="14" class="node good"/>
+                        <text x="716" y="278" class="txt">Run</text>
+                        <rect x="250" y="432" width="394" height="86" rx="14" class="node redis"/>
+                        <text x="288" y="468" class="txt">Idempotency ledger</text><text x="288" y="496" class="small">checkpoint to resulting workflow id</text>
+                    </svg>
+                </div>
+            </div>
+            <div class="footer"><span>Idempotency and locks</span><span>06</span></div>
+        </section>
+    </div>
+
+    <div class="slide-shell">
+        <section class="slide" aria-label="Chapter 7">
+            <div class="slide-left">
+                <div>
+                    <div class="chapter">Chapter 7</div>
+                    <h2>Provider failures become system state</h2>
+                    <div class="question">What if Twelve Data, Tavily, SEC, LangCache, or Agent Memory starts failing?</div>
+                </div>
+                <div class="impl">
+                    <div class="label">Implementation</div>
+                    <div class="impl-name">Circuit breaker</div>
+                    <ul class="notes">
+                        <li>Store provider health in Redis.</li>
+                        <li>Fail fast while the circuit is open.</li>
+                        <li>Use half open probes to close safely.</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="slide-right">
+                <div class="diagram">
+                    <div class="diagram-title">Provider health is shared state</div>
+                    <svg viewBox="0 0 828 628" aria-hidden="true">
+                        <defs><marker id="arrow" markerWidth="12" markerHeight="12" refX="9" refY="4" orient="auto"><path d="M0,0 L0,8 L11,4 z" fill="#8794a8"/></marker></defs>
+                        <rect x="92" y="150" width="164" height="94" rx="14" class="node good"/>
+                        <text x="126" y="192" class="txt">Closed</text><text x="126" y="220" class="small">calls allowed</text>
+                        <path d="M256 197 L352 197" class="line danger"/>
+                        <rect x="352" y="150" width="164" height="94" rx="14" class="node danger"/>
+                        <text x="386" y="192" class="txt">Open</text><text x="386" y="220" class="small">fail fast</text>
+                        <path d="M516 197 L612 197" class="line wait"/>
+                        <rect x="612" y="150" width="164" height="94" rx="14" class="node wait"/>
+                        <text x="646" y="192" class="txt">Half open</text><text x="646" y="220" class="small">probe</text>
+                        <rect x="178" y="394" width="472" height="102" rx="14" class="node redis"/>
+                        <text x="216" y="436" class="txt">Redis provider health</text>
+                        <text x="216" y="466" class="small">state, failures, retryAt, active probes</text>
+                    </svg>
+                </div>
+            </div>
+            <div class="footer"><span>Circuit breaker</span><span>07</span></div>
+        </section>
+    </div>
+
+    <div class="slide-shell">
+        <section class="slide" aria-label="Chapter 8">
+            <div class="slide-left">
+                <div>
+                    <div class="chapter">Chapter 8</div>
+                    <h2>Provider capacity is protected</h2>
+                    <div class="question">What if the provider is healthy but can only handle a few concurrent calls?</div>
+                </div>
+                <div class="impl">
+                    <div class="label">Implementation</div>
+                    <div class="impl-name">Distributed semaphore</div>
+                    <ul class="notes">
+                        <li>Acquire a permit before the provider call.</li>
+                        <li>Share the active count across replicas.</li>
+                        <li>Use TTLs to release leaked permits after crashes.</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="slide-right">
+                <div class="diagram">
+                    <div class="diagram-title">Redis protects provider concurrency</div>
+                    <svg viewBox="0 0 828 628" aria-hidden="true">
+                        <defs><marker id="arrow" markerWidth="12" markerHeight="12" refX="9" refY="4" orient="auto"><path d="M0,0 L0,8 L11,4 z" fill="#8794a8"/></marker></defs>
+                        <rect x="86" y="126" width="150" height="76" rx="14" class="node blue"/><text x="120" y="172" class="txt">Call 1</text>
+                        <rect x="86" y="244" width="150" height="76" rx="14" class="node blue"/><text x="120" y="290" class="txt">Call 2</text>
+                        <rect x="86" y="362" width="150" height="76" rx="14" class="node wait"/><text x="120" y="408" class="txt">Call 3</text>
+                        <path d="M236 164 L366 240" class="line good"/><path d="M236 282 L366 282" class="line good"/><path d="M236 400 L366 326" class="line wait"/>
+                        <rect x="366" y="210" width="204" height="144" rx="14" class="node redis"/>
+                        <text x="402" y="254" class="txt">Semaphore</text><text x="402" y="284" class="small">limit 2</text><text x="402" y="312" class="small">active 2</text>
+                        <path d="M570 282 L684 282" class="line good"/>
+                        <rect x="684" y="228" width="104" height="108" rx="14" class="node good"/>
+                        <text x="712" y="276" class="txt">API</text><text x="712" y="304" class="small">safe</text>
+                    </svg>
+                </div>
+            </div>
+            <div class="footer"><span>Distributed semaphore</span><span>08</span></div>
+        </section>
+    </div>
+
+    <div class="slide-shell">
+        <section class="slide" aria-label="Chapter 9">
+            <div class="slide-left">
+                <div>
+                    <div class="chapter">Chapter 9</div>
+                    <h2>Failed steps get a record</h2>
+                    <div class="question">What if retries are exhausted and the step still cannot finish?</div>
+                </div>
+                <div class="impl">
+                    <div class="label">Implementation</div>
+                    <div class="impl-name">Retries and dead letter queue</div>
+                    <ul class="notes">
+                        <li>Retry transient provider failures with bounds.</li>
+                        <li>Write exhausted failures to a Redis stream.</li>
+                        <li>Keep the failed workflow inspectable in Grafana.</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="slide-right">
+                <div class="diagram">
+                    <div class="diagram-title">Failures become inspectable records</div>
+                    <svg viewBox="0 0 828 628" aria-hidden="true">
+                        <defs><marker id="arrow" markerWidth="12" markerHeight="12" refX="9" refY="4" orient="auto"><path d="M0,0 L0,8 L11,4 z" fill="#8794a8"/></marker></defs>
+                        <rect x="86" y="158" width="168" height="90" rx="14" class="node blue"/><text x="120" y="198" class="txt">Step</text><text x="120" y="226" class="small">attempt 1</text>
+                        <path d="M254 203 L354 203" class="line wait"/>
+                        <rect x="354" y="158" width="168" height="90" rx="14" class="node wait"/><text x="388" y="198" class="txt">Retry</text><text x="388" y="226" class="small">attempt 2, 3</text>
+                        <path d="M522 203 L622 203" class="line danger"/>
+                        <rect x="622" y="158" width="136" height="90" rx="14" class="node danger"/><text x="650" y="198" class="txt">Failed</text><text x="650" y="226" class="small">exhausted</text>
+                        <path d="M690 248 L690 362" class="line redis"/>
+                        <rect x="164" y="362" width="526" height="116" rx="14" class="node redis"/>
+                        <text x="202" y="406" class="txt">Provider dead letter stream</text>
+                        <text x="202" y="436" class="small">workflowId, stepId, provider, attempts, reason</text>
+                    </svg>
+                </div>
+            </div>
+            <div class="footer"><span>Retries and dead letter queue</span><span>09</span></div>
+        </section>
+    </div>
+
+    <div class="slide-shell">
+        <section class="slide" aria-label="Chapter 10">
+            <div class="slide-left">
+                <div>
+                    <div class="chapter">Chapter 10</div>
+                    <h2>A human can take over</h2>
+                    <div class="question">What if a tool call needs explicit approval before it runs?</div>
+                </div>
+                <div class="impl">
+                    <div class="label">Implementation</div>
+                    <div class="impl-name">Human in the loop</div>
+                    <ul class="notes">
+                        <li>Pause at the deterministic tool boundary.</li>
+                        <li>Store pending approval and checkpoint in Redis.</li>
+                        <li>Resume with the approval decision in context.</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="slide-right">
+                <div class="diagram">
+                    <div class="diagram-title">Approval pauses and resumes the workflow</div>
+                    <svg viewBox="0 0 828 628" aria-hidden="true">
+                        <defs><marker id="arrow" markerWidth="12" markerHeight="12" refX="9" refY="4" orient="auto"><path d="M0,0 L0,8 L11,4 z" fill="#8794a8"/></marker></defs>
+                        <rect x="84" y="154" width="172" height="94" rx="14" class="node blue"/><text x="118" y="194" class="txt">Tool call</text><text x="118" y="222" class="small">approval required</text>
+                        <path d="M256 201 L366 201" class="line redis"/>
+                        <rect x="366" y="132" width="206" height="138" rx="14" class="node redis"/><text x="402" y="176" class="txt">Pending approval</text><text x="402" y="206" class="small">tool plus arguments</text><text x="402" y="234" class="small">checkpoint id</text>
+                        <path d="M572 201 L682 201" class="line wait"/>
+                        <rect x="682" y="154" width="92" height="94" rx="14" class="node wait"/><text x="708" y="196" class="txt">User</text><text x="708" y="224" class="small">decides</text>
+                        <rect x="154" y="390" width="520" height="94" rx="14" class="node good"/>
+                        <text x="192" y="432" class="txt">Resume</text><text x="192" y="462" class="small">approved or rejected decision becomes coordinator context</text>
+                    </svg>
+                </div>
+            </div>
+            <div class="footer"><span>Human in the loop</span><span>10</span></div>
+        </section>
+    </div>
+
+    <div class="slide-shell">
+        <section class="slide" aria-label="Chapter 11">
+            <div class="slide-left">
+                <div>
+                    <div class="chapter">Chapter 11</div>
+                    <h2>The same chat continues</h2>
+                    <div class="question">What if recovery creates a new workflow but the user expects the same conversation?</div>
+                </div>
+                <div class="impl">
+                    <div class="label">Implementation</div>
+                    <div class="impl-name">Workflow resume and chat continuation</div>
+                    <ul class="notes">
+                        <li>Create a new workflow for recovered work.</li>
+                        <li>Keep the same session and conversation id.</li>
+                        <li>Append the answer as the next chat turn.</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="slide-right">
+                <div class="diagram">
+                    <div class="diagram-title">Recovery is visible without starting a new chat</div>
+                    <svg viewBox="0 0 828 628" aria-hidden="true">
+                        <defs><marker id="arrow" markerWidth="12" markerHeight="12" refX="9" refY="4" orient="auto"><path d="M0,0 L0,8 L11,4 z" fill="#8794a8"/></marker></defs>
+                        <rect x="76" y="156" width="178" height="98" rx="14" class="node danger"/><text x="112" y="198" class="txt">Workflow A</text><text x="112" y="226" class="small">waiting or failed</text>
+                        <path d="M254 205 L372 205" class="line redis"/>
+                        <rect x="372" y="156" width="180" height="98" rx="14" class="node redis"/><text x="406" y="198" class="txt">Redis link</text><text x="406" y="226" class="small">replayedFrom</text>
+                        <path d="M552 205 L670 205" class="line good"/>
+                        <rect x="670" y="156" width="94" height="98" rx="14" class="node good"/><text x="698" y="200" class="txt">B</text><text x="698" y="226" class="small">done</text>
+                        <rect x="122" y="386" width="584" height="116" rx="14" class="node blue"/>
+                        <text x="160" y="430" class="txt">Chat UI</text>
+                        <text x="160" y="460" class="small">same session, same conversation, recovered answer as next turn</text>
+                    </svg>
+                </div>
+            </div>
+            <div class="footer"><span>Workflow resume and chat continuation</span><span>11</span></div>
+        </section>
+    </div>
+</main>
+
+<script>
+    function scaleSlides() {
+        const scale = Math.min(1, Math.max(0.42, (window.innerWidth - 40) / 1280));
+        document.documentElement.style.setProperty("--slide-scale", String(scale));
+        document.querySelectorAll(".slide-shell").forEach(function (shell) {
+            shell.style.setProperty("--shell-width", (1280 * scale) + "px");
+            shell.style.setProperty("--shell-height", (720 * scale) + "px");
+        });
+    }
+
+    window.addEventListener("resize", scaleSlides);
+    scaleSlides();
+</script>
+</body>
+</html>

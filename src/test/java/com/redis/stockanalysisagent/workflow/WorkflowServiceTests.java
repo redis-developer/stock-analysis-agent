@@ -1,18 +1,19 @@
 package com.redis.stockanalysisagent.workflow;
 
+import com.redis.stockanalysisagent.workflow.execution.WorkflowQueueService;
+import com.redis.stockanalysisagent.workflow.execution.WorkflowLeaseService;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.core.HashOperations;
 import org.springframework.data.redis.core.ListOperations;
 import org.springframework.data.redis.core.RedisOperations;
 import org.springframework.data.redis.core.SessionCallback;
+import org.springframework.data.redis.core.StreamOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
-import org.springframework.data.redis.core.ZSetOperations;
 
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import java.util.Optional;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -35,7 +36,7 @@ class WorkflowServiceTests {
     void startCreatesRunningWorkflowWithBoundedTtl() {
         StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
         PipelineCapture pipeline = capturePipeline(redisTemplate, List.of(1L, "workflow-0"));
-        WorkflowService service = new WorkflowService(redisTemplate, CLOCK, () -> "workflow-1", () -> "owner-1");
+        WorkflowService service = new WorkflowService(redisTemplate, CLOCK, () -> "workflow-1", () -> "worker-1");
 
         WorkflowMetadata workflow = service.start("alice", "session-1", "alice:session-1", " client-1 ");
 
@@ -53,10 +54,6 @@ class WorkflowServiceTests {
                 .containsEntry("status", "RUNNING")
                 .containsEntry("previousWorkflowId", "workflow-0")
                 .containsEntry("turnIndex", "2")
-                .containsEntry("ownerId", "owner-1")
-                .containsEntry("leaseUntil", "2026-06-19T10:15:45Z")
-                .containsEntry("leaseUntilEpochMs", "1781864145000")
-                .containsEntry("leaseVersion", "1")
                 .containsEntry("attempt", "1")
                 .containsEntry("createdAt", "2026-06-19T10:15:30Z")
                 .containsEntry("updatedAt", "2026-06-19T10:15:30Z");
@@ -76,11 +73,13 @@ class WorkflowServiceTests {
                         new ListPush("stock-analysis:users:alice:conversations", "alice:session-1"),
                         new ListPush("stock-analysis:conversations:alice:session-1:workflows", "workflow-1")
                 );
-        assertThat(pipeline.zsetAdds())
-                .containsExactly(new ZSetAdd("stock-analysis:workflows:running", "workflow-1", 1781864145000.0));
+        assertThat(pipeline.streamAdds())
+                .containsExactly(new StreamAdd(WorkflowQueueService.RECOVERY_STREAM_KEY, "workflow-1"));
+        assertThat(pipeline.leaseSets())
+                .containsExactly(new LeaseSet(WorkflowLeaseService.leaseKey("workflow-1"), "worker-1"));
         verify(redisTemplate, times(2)).executePipelined(any(SessionCallback.class));
         verify(pipeline.operations()).expire(WorkflowService.workflowKey("workflow-1"), WorkflowService.workflowTtl());
-        verify(pipeline.operations()).expire(WorkflowService.runningWorkflowsKey(), WorkflowService.workflowTtl());
+        verify(pipeline.operations()).expire(WorkflowQueueService.RECOVERY_STREAM_KEY, WorkflowService.workflowTtl());
         verify(pipeline.operations()).expire(
                 WorkflowService.sessionWorkflowsKey("session-1"),
                 WorkflowService.workflowTtl()
@@ -103,7 +102,7 @@ class WorkflowServiceTests {
     void startReplayStoresReplayOriginInWorkflowHash() {
         StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
         PipelineCapture pipeline = capturePipeline(redisTemplate, List.of(1L, "workflow-0"));
-        WorkflowService service = new WorkflowService(redisTemplate, CLOCK, () -> "workflow-1", () -> "owner-1");
+        WorkflowService service = new WorkflowService(redisTemplate, CLOCK, () -> "workflow-1", () -> "worker-1");
 
         WorkflowMetadata workflow = service.start(
                 "alice",
@@ -125,21 +124,24 @@ class WorkflowServiceTests {
     @Test
     void completeWritesTerminalStatusWithTtl() {
         StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
-        WorkflowService service = new WorkflowService(redisTemplate, CLOCK, () -> "unused", () -> "owner-1");
+        PipelineCapture pipeline = capturePipeline(redisTemplate);
+        when(pipeline.valueOperations().get(WorkflowLeaseService.leaseKey("workflow-1"))).thenReturn("worker-1");
+        WorkflowService service = new WorkflowService(redisTemplate, CLOCK, () -> "unused", () -> "worker-1");
         WorkflowMetadata running = runningWorkflow();
 
         WorkflowMetadata completed = service.complete(running);
 
         assertThat(completed.status()).isEqualTo(WorkflowStatus.COMPLETED);
         assertThat(completed.finishedAt()).isEqualTo(Instant.parse("2026-06-19T10:15:30Z"));
-        assertThat(completed.ownerId()).isEqualTo("owner-1");
-        assertThat(completed.leaseVersion()).isEqualTo(1L);
+        assertThat(pipeline.fields()).containsEntry("status", "COMPLETED");
     }
 
     @Test
     void failWritesFailureStatusBeforeExceptionPropagates() {
         StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
-        WorkflowService service = new WorkflowService(redisTemplate, CLOCK, () -> "unused", () -> "owner-1");
+        PipelineCapture pipeline = capturePipeline(redisTemplate);
+        when(pipeline.valueOperations().get(WorkflowLeaseService.leaseKey("workflow-1"))).thenReturn("worker-1");
+        WorkflowService service = new WorkflowService(redisTemplate, CLOCK, () -> "unused", () -> "worker-1");
 
         WorkflowMetadata failed = service.fail(runningWorkflow(), new IllegalStateException("analysis failed"));
 
@@ -149,67 +151,37 @@ class WorkflowServiceTests {
     }
 
     @Test
-    void executionLockUsesRedisSetIfAbsentWithTtl() {
+    void markRecoveredStoresRecoveredWorkflowIdOnOriginalWorkflow() {
         StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
-        ValueOperations<String, String> valueOperations = mock(ValueOperations.class);
-        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(valueOperations.setIfAbsent(
-                eq(WorkflowService.executionLockKey("replay:workflow-1:checkpoint-1")),
-                any(),
-                eq(WorkflowService.WORKFLOW_EXECUTION_LOCK_TTL)
-        )).thenReturn(true);
-        WorkflowService service = new WorkflowService(redisTemplate, CLOCK, () -> "unused", () -> "owner-1");
+        PipelineCapture pipeline = capturePipeline(redisTemplate);
+        when(pipeline.valueOperations().get(WorkflowLeaseService.leaseKey("workflow-1"))).thenReturn("worker-1");
+        WorkflowService service = new WorkflowService(redisTemplate, CLOCK, () -> "unused", () -> "worker-1");
 
-        Optional<WorkflowService.ExecutionLock> lock =
-                service.tryAcquireExecutionLock("replay:workflow-1:checkpoint-1");
+        WorkflowMetadata recovered = service.markRecovered(runningWorkflow(), "replay-workflow");
 
-        assertThat(lock).isPresent();
+        assertThat(recovered.status()).isEqualTo(WorkflowStatus.RECOVERED);
+        assertThat(pipeline.fields())
+                .containsEntry("status", "RECOVERED")
+                .containsEntry(WorkflowService.RECOVERED_BY_WORKFLOW_ID, "replay-workflow");
     }
 
     @Test
-    void completedIdempotentWorkflowReadsCompletedRecord() {
+    void recoveredByWorkflowIdReadsRecoveredWorkflowHashOnly() {
         StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
         HashOperations<String, Object, Object> hashOperations = mock(HashOperations.class);
         when(redisTemplate.opsForHash()).thenReturn(hashOperations);
-        when(hashOperations.entries(WorkflowService.idempotencyKey("replay:workflow-1:checkpoint-1")))
-                .thenReturn(Map.of(
-                        "workflowId", "replay-workflow",
-                        "conversationId", "alice:session-1",
-                        "status", "COMPLETED"
-                ));
-        WorkflowService service = new WorkflowService(redisTemplate, CLOCK, () -> "unused", () -> "owner-1");
+        when(hashOperations.entries(WorkflowService.workflowKey("workflow-1"))).thenReturn(Map.of(
+                "status", "RECOVERED",
+                WorkflowService.RECOVERED_BY_WORKFLOW_ID, "replay-workflow"
+        ));
+        when(hashOperations.entries(WorkflowService.workflowKey("workflow-2"))).thenReturn(Map.of(
+                "status", "RUNNING",
+                WorkflowService.RECOVERED_BY_WORKFLOW_ID, "replay-workflow"
+        ));
+        WorkflowService service = new WorkflowService(redisTemplate, CLOCK, () -> "unused", () -> "worker-1");
 
-        Optional<WorkflowService.IdempotentWorkflow> result =
-                service.completedIdempotentWorkflow("replay:workflow-1:checkpoint-1");
-
-        assertThat(result).isPresent();
-        assertThat(result.get().workflowId()).isEqualTo("replay-workflow");
-        assertThat(result.get().conversationId()).isEqualTo("alice:session-1");
-    }
-
-    @Test
-    void recordCompletedIdempotentWorkflowWritesBoundedHash() {
-        StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
-        PipelineCapture pipeline = capturePipeline(redisTemplate);
-        WorkflowService service = new WorkflowService(redisTemplate, CLOCK, () -> "unused", () -> "owner-1");
-
-        service.recordCompletedIdempotentWorkflow(
-                "replay:workflow-1:checkpoint-1",
-                "replay-workflow",
-                "alice:session-1",
-                WorkflowStatus.COMPLETED
-        );
-
-        assertThat(pipeline.fields())
-                .containsEntry("idempotencyKey", "replay:workflow-1:checkpoint-1")
-                .containsEntry("workflowId", "replay-workflow")
-                .containsEntry("conversationId", "alice:session-1")
-                .containsEntry("status", "COMPLETED")
-                .containsEntry("completedAt", "2026-06-19T10:15:30Z");
-        verify(pipeline.operations()).expire(
-                WorkflowService.idempotencyKey("replay:workflow-1:checkpoint-1"),
-                WorkflowService.workflowTtl()
-        );
+        assertThat(service.recoveredByWorkflowId("workflow-1")).contains("replay-workflow");
+        assertThat(service.recoveredByWorkflowId("workflow-2")).isEmpty();
     }
 
     private WorkflowMetadata runningWorkflow() {
@@ -222,9 +194,6 @@ class WorkflowServiceTests {
                 WorkflowStatus.RUNNING,
                 "workflow-0",
                 2,
-                "owner-1",
-                Instant.parse("2026-06-19T10:15:45Z"),
-                1L,
                 1,
                 Instant.parse("2026-06-19T10:00:00Z"),
                 Instant.parse("2026-06-19T10:00:00Z"),
@@ -243,14 +212,18 @@ class WorkflowServiceTests {
         RedisOperations operations = mock(RedisOperations.class);
         HashOperations hashOperations = mock(HashOperations.class);
         ListOperations listOperations = mock(ListOperations.class);
-        ZSetOperations zSetOperations = mock(ZSetOperations.class);
+        StreamOperations streamOperations = mock(StreamOperations.class);
+        ValueOperations valueOperations = mock(ValueOperations.class);
         CapturedFields capturedFields = new CapturedFields();
         List<ListPush> listPushes = new ArrayList<>();
-        List<ZSetAdd> zsetAdds = new ArrayList<>();
+        List<StreamAdd> streamAdds = new ArrayList<>();
+        List<LeaseSet> leaseSets = new ArrayList<>();
         AtomicInteger pipelineCallCount = new AtomicInteger();
         when(operations.opsForHash()).thenReturn(hashOperations);
         when(operations.opsForList()).thenReturn(listOperations);
-        when(operations.opsForZSet()).thenReturn(zSetOperations);
+        when(operations.opsForStream()).thenReturn(streamOperations);
+        when(operations.opsForValue()).thenReturn(valueOperations);
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         when(redisTemplate.executePipelined(any(SessionCallback.class))).thenAnswer(invocation -> {
             if (firstPipelineResults != null && pipelineCallCount.getAndIncrement() == 0) {
                 return firstPipelineResults;
@@ -272,17 +245,24 @@ class WorkflowServiceTests {
             return null;
         }).when(listOperations).leftPush(any(), any());
         doAnswer(invocation -> {
-            zsetAdds.add(new ZSetAdd(invocation.getArgument(0), invocation.getArgument(1), invocation.getArgument(2)));
+            Map<String, String> fields = invocation.getArgument(1);
+            streamAdds.add(new StreamAdd(invocation.getArgument(0), fields.get("workflowId")));
             return null;
-        }).when(zSetOperations).add(any(), any(), any(Double.class));
-        return new PipelineCapture(operations, capturedFields, listPushes, zsetAdds);
+        }).when(streamOperations).add(any(), any(Map.class));
+        doAnswer(invocation -> {
+            leaseSets.add(new LeaseSet(invocation.getArgument(0), invocation.getArgument(1)));
+            return true;
+        }).when(valueOperations).setIfAbsent(any(), any(), any());
+        return new PipelineCapture(operations, valueOperations, capturedFields, listPushes, streamAdds, leaseSets);
     }
 
     private record PipelineCapture(
             RedisOperations operations,
+            ValueOperations valueOperations,
             CapturedFields capturedFields,
             List<ListPush> listPushes,
-            List<ZSetAdd> zsetAdds
+            List<StreamAdd> streamAdds,
+            List<LeaseSet> leaseSets
     ) {
         private Map<String, String> fields() {
             return capturedFields.fields;
@@ -295,10 +275,15 @@ class WorkflowServiceTests {
     ) {
     }
 
-    private record ZSetAdd(
+    private record StreamAdd(
             String key,
-            String value,
-            Double score
+            String workflowId
+    ) {
+    }
+
+    private record LeaseSet(
+            String key,
+            String workerId
     ) {
     }
 

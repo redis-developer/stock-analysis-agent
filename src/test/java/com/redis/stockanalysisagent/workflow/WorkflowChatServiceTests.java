@@ -3,17 +3,22 @@ package com.redis.stockanalysisagent.chat;
 import com.redis.stockanalysisagent.cache.ExternalDataCache;
 import com.redis.stockanalysisagent.memory.AmsChatMemoryRepository;
 import com.redis.stockanalysisagent.session.ChatSessionIndexService;
+import com.redis.stockanalysisagent.session.WorkflowStepProjector;
 import com.redis.stockanalysisagent.session.dto.ChatSessionMetadata;
 import com.redis.stockanalysisagent.workflow.WorkflowContextHolder;
+import com.redis.stockanalysisagent.workflow.events.WorkflowEventService;
 import com.redis.stockanalysisagent.workflow.WorkflowMetadata;
+import com.redis.stockanalysisagent.workflow.approval.WorkflowApprovalService;
 import com.redis.stockanalysisagent.workflow.WorkflowService;
 import com.redis.stockanalysisagent.workflow.WorkflowStatus;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -32,18 +37,27 @@ class WorkflowChatServiceTests {
     private final AmsChatMemoryRepository memoryRepository = mock(AmsChatMemoryRepository.class);
     private final ChatAnalysisService chatAnalysisService = mock(ChatAnalysisService.class);
     private final ExternalDataCache externalDataCache = mock(ExternalDataCache.class);
-    private final ChatProgressPublisher progressPublisher = mock(ChatProgressPublisher.class);
+    private final WorkflowProgress workflowProgress = mock(WorkflowProgress.class);
     private final WorkflowService workflowService = mock(WorkflowService.class);
+    private final WorkflowEventService workflowEventService = mock(WorkflowEventService.class);
+    private final WorkflowStepProjector workflowStepProjector = new WorkflowStepProjector(workflowEventService);
     private final ChatSessionIndexService sessionIndexService = mock(ChatSessionIndexService.class);
+    private final WorkflowApprovalService approvalService = mock(WorkflowApprovalService.class);
     private final ChatService chatService = new ChatService(
             memoryRepository,
             chatAnalysisService,
             externalDataCache,
-            progressPublisher,
+            workflowProgress,
             workflowService,
+            workflowStepProjector,
             sessionIndexService,
-            null
+            approvalService
     );
+
+    @BeforeEach
+    void setUp() {
+        when(approvalService.pendingApprovalForWorkflow(any())).thenReturn(Optional.empty());
+    }
 
     @Test
     void successfulChatCompletesWorkflowAndClearsContext() {
@@ -66,7 +80,21 @@ class WorkflowChatServiceTests {
         when(memoryRepository.getLastRetrievedMemories()).thenReturn(List.of());
         when(workflowService.complete(running)).thenReturn(completed);
 
-        ChatService.ChatTurn turn = chatService.chat("alice", "session-1", " hello ", "client-1", 4, true, true);
+        ChatService.ChatTurn turn = chatService.run(new ChatService.ChatRunRequest(
+                "alice",
+                "session-1",
+                " hello ",
+                "client-1",
+                4,
+                true,
+                true,
+                List.of(),
+                "chat",
+                null,
+                null,
+                true,
+                null
+        ));
 
         assertThat(turn.workflowId()).isEqualTo("workflow-1");
         assertThat(turn.workflowStatus()).isEqualTo(WorkflowStatus.COMPLETED);
@@ -100,7 +128,7 @@ class WorkflowChatServiceTests {
                         List.of(),
                         List.of()
                 ));
-        when(workflowService.workflowEvents("source-workflow", 200)).thenReturn(List.of(
+        when(workflowEventService.events("source-workflow", 200)).thenReturn(List.of(
                 Map.of(
                         "stepId", "COORDINATOR",
                         "kind", "agent",
@@ -114,7 +142,7 @@ class WorkflowChatServiceTests {
         when(memoryRepository.getLastRetrievedMemories()).thenReturn(List.of());
         when(workflowService.complete(running)).thenReturn(completed);
 
-        ChatService.ChatTurn turn = chatService.replay(
+        ChatService.ChatTurn turn = chatService.run(new ChatService.ChatRunRequest(
                 "alice",
                 "session-1",
                 " replay message ",
@@ -122,10 +150,13 @@ class WorkflowChatServiceTests {
                 4,
                 true,
                 false,
+                List.of(),
+                "replay",
                 "source-workflow",
                 "source-checkpoint",
+                true,
                 "original user question"
-        );
+        ));
 
         assertThat(turn.workflowId()).isEqualTo("workflow-1");
         assertThat(turn.workflowStatus()).isEqualTo(WorkflowStatus.COMPLETED);
@@ -145,10 +176,11 @@ class WorkflowChatServiceTests {
                 anyBoolean(),
                 anyBoolean(),
                 any(),
-                isNull()
+                isNull(),
+                eq("workflow-1")
         );
         ArgumentCaptor<ChatSessionMetadata> metadata = ArgumentCaptor.forClass(ChatSessionMetadata.class);
-        verify(progressPublisher).workflow(metadata.capture());
+        verify(workflowProgress).workflow(metadata.capture());
         assertThat(metadata.getValue().latestWorkflowId()).isEqualTo("workflow-1");
         assertThat(metadata.getValue().recoveredFromWorkflowId()).isEqualTo("source-workflow");
         assertThat(metadata.getValue().latestWorkflowSteps())
@@ -189,18 +221,21 @@ class WorkflowChatServiceTests {
         when(memoryRepository.getLastRetrievedMemories()).thenReturn(List.of());
         when(workflowService.complete(running)).thenReturn(completed);
 
-        ChatService.ChatTurn turn = chatService.recover(
+        ChatService.ChatTurn turn = chatService.run(new ChatService.ChatRunRequest(
                 "alice",
                 "session-1",
                 " internal replay prompt ",
-                "original user question",
                 "recovery-client",
                 4,
                 true,
                 false,
+                List.of(),
+                "recovery",
                 "source-workflow",
-                "source-checkpoint"
-        );
+                "source-checkpoint",
+                true,
+                "original user question"
+        ));
 
         assertThat(turn.workflowStatus()).isEqualTo(WorkflowStatus.COMPLETED);
         verify(memoryRepository).saveTurn(
@@ -213,7 +248,8 @@ class WorkflowChatServiceTests {
                 anyBoolean(),
                 anyBoolean(),
                 any(),
-                isNull()
+                isNull(),
+                eq("workflow-1")
         );
     }
 
@@ -226,7 +262,21 @@ class WorkflowChatServiceTests {
                 .thenThrow(failure);
         when(workflowService.fail(running, failure)).thenReturn(workflow(WorkflowStatus.FAILED, "analysis failed"));
 
-        assertThatThrownBy(() -> chatService.chat("alice", "session-1", "hello", "client-1", 4, true, true))
+        assertThatThrownBy(() -> chatService.run(new ChatService.ChatRunRequest(
+                "alice",
+                "session-1",
+                "hello",
+                "client-1",
+                4,
+                true,
+                true,
+                List.of(),
+                "chat",
+                null,
+                null,
+                true,
+                null
+        )))
                 .isSameAs(failure);
 
         verify(sessionIndexService).recordSessionStarted("alice", "session-1");
@@ -246,9 +296,6 @@ class WorkflowChatServiceTests {
                 status,
                 "workflow-0",
                 2,
-                "owner-1",
-                Instant.parse("2026-06-19T10:16:15Z"),
-                1L,
                 1,
                 now,
                 now,

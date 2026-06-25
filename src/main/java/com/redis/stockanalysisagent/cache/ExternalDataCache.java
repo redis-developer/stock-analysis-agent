@@ -1,14 +1,14 @@
 package com.redis.stockanalysisagent.cache;
 
-import com.redis.stockanalysisagent.chat.ChatProgressPublisher;
-import com.redis.stockanalysisagent.reliability.CircuitBreakerOpenException;
-import com.redis.stockanalysisagent.reliability.CircuitBreakerService;
-import com.redis.stockanalysisagent.reliability.ProviderCapacityService;
-import com.redis.stockanalysisagent.reliability.ProviderCapacityTimeoutException;
-import com.redis.stockanalysisagent.reliability.ProviderDeadLetterService;
-import com.redis.stockanalysisagent.reliability.ProviderLatencySimulationService;
-import com.redis.stockanalysisagent.reliability.ProviderRetriesExhaustedException;
-import com.redis.stockanalysisagent.reliability.ProviderRetryProperties;
+import com.redis.stockanalysisagent.chat.WorkflowProgress;
+import com.redis.stockanalysisagent.reliability.circuitbreaker.CircuitBreakerOpenException;
+import com.redis.stockanalysisagent.reliability.circuitbreaker.CircuitBreakerService;
+import com.redis.stockanalysisagent.reliability.capacity.ProviderCapacityService;
+import com.redis.stockanalysisagent.reliability.capacity.ProviderCapacityTimeoutException;
+import com.redis.stockanalysisagent.reliability.deadletter.ProviderDeadLetterService;
+import com.redis.stockanalysisagent.reliability.simulation.ProviderLatencySimulationService;
+import com.redis.stockanalysisagent.reliability.deadletter.ProviderRetriesExhaustedException;
+import com.redis.stockanalysisagent.reliability.deadletter.ProviderRetryProperties;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
@@ -24,7 +24,7 @@ import java.util.function.Supplier;
 public class ExternalDataCache {
 
     private final CacheManager cacheManager;
-    private final ChatProgressPublisher progressPublisher;
+    private final WorkflowProgress workflowProgress;
     private final ExternalApiUsageService apiUsageService;
     private final CircuitBreakerService circuitBreakerService;
     private final ProviderCapacityService providerCapacityService;
@@ -38,7 +38,7 @@ public class ExternalDataCache {
     @Autowired
     public ExternalDataCache(
             CacheManager cacheManager,
-            ChatProgressPublisher progressPublisher,
+            WorkflowProgress workflowProgress,
             ExternalApiUsageService apiUsageService,
             CircuitBreakerService circuitBreakerService,
             ProviderCapacityService providerCapacityService,
@@ -47,7 +47,7 @@ public class ExternalDataCache {
             ProviderDeadLetterService deadLetterService
     ) {
         this.cacheManager = cacheManager;
-        this.progressPublisher = progressPublisher;
+        this.workflowProgress = workflowProgress;
         this.apiUsageService = apiUsageService;
         this.circuitBreakerService = circuitBreakerService;
         this.providerCapacityService = providerCapacityService;
@@ -58,11 +58,11 @@ public class ExternalDataCache {
 
     ExternalDataCache(
             CacheManager cacheManager,
-            ChatProgressPublisher progressPublisher,
+            WorkflowProgress workflowProgress,
             ExternalApiUsageService apiUsageService
     ) {
         this.cacheManager = cacheManager;
-        this.progressPublisher = progressPublisher;
+        this.workflowProgress = workflowProgress;
         this.apiUsageService = apiUsageService;
         this.circuitBreakerService = null;
         this.providerCapacityService = null;
@@ -154,19 +154,19 @@ public class ExternalDataCache {
         String label = apiProgressLabel(cacheName);
         try {
             T loaded = loadWithProviderControls(cacheName, key, () -> {
-                progressPublisher.running(
+                workflowProgress.running(
                         id,
                         label,
-                        ChatProgressPublisher.KIND_SYSTEM,
+                        WorkflowProgress.KIND_SYSTEM,
                         "Fetching " + dataProgressName(cacheName, key) + "."
                 );
                 apiUsageService.recordHitForCacheName(cacheName);
                 sleepIfLatencySimulationEnabled(cacheName);
                 T result = loader.get();
-                progressPublisher.completed(
+                workflowProgress.completed(
                         id,
                         label,
-                        ChatProgressPublisher.KIND_SYSTEM,
+                        WorkflowProgress.KIND_SYSTEM,
                         elapsedDurationMs(startedAt),
                         "Fetched " + dataProgressName(cacheName, key) + "."
                 );
@@ -175,10 +175,10 @@ public class ExternalDataCache {
             return loaded;
         } catch (CircuitBreakerOpenException ex) {
             appendDeadLetter(id, cacheName, key, 0, ex);
-            progressPublisher.failed(
+            workflowProgress.failed(
                     id,
                     "Circuit breaker",
-                    ChatProgressPublisher.KIND_SYSTEM,
+                    WorkflowProgress.KIND_SYSTEM,
                     elapsedDurationMs(startedAt),
                     "Blocked " + providerLabel(ex.providerId()) + " call because provider state is " + ex.state().state() + "."
             );
@@ -188,20 +188,20 @@ public class ExternalDataCache {
             throw ex;
         } catch (ProviderRetriesExhaustedException ex) {
             appendDeadLetter(id, cacheName, key, ex.attempts(), ex);
-            progressPublisher.failed(
+            workflowProgress.failed(
                     id,
                     label,
-                    ChatProgressPublisher.KIND_SYSTEM,
+                    WorkflowProgress.KIND_SYSTEM,
                     elapsedDurationMs(startedAt),
                     errorMessage(ex)
             );
             throw ex;
         } catch (RuntimeException ex) {
             appendDeadLetter(id, cacheName, key, 1, ex);
-            progressPublisher.failed(
+            workflowProgress.failed(
                     id,
                     label,
-                    ChatProgressPublisher.KIND_SYSTEM,
+                    WorkflowProgress.KIND_SYSTEM,
                     elapsedDurationMs(startedAt),
                     errorMessage(ex)
             );
@@ -222,27 +222,27 @@ public class ExternalDataCache {
         String label = "Waiting for " + providerLabel(providerId) + " capacity";
         String stepId = capacityStepId(providerId, cacheName, key);
         long startedAt = System.nanoTime();
-        progressPublisher.running(
+        workflowProgress.running(
                 stepId,
                 label,
-                ChatProgressPublisher.KIND_SYSTEM,
+                WorkflowProgress.KIND_SYSTEM,
                 "Waiting for a Redis semaphore permit before calling " + providerLabel(providerId) + "."
         );
         try (ProviderCapacityService.Permit permit = providerCapacityService.acquire(providerId)) {
             long waitedMs = elapsedDurationMs(startedAt);
-            progressPublisher.completed(
+            workflowProgress.completed(
                     stepId,
                     providerLabel(providerId) + " permit acquired",
-                    ChatProgressPublisher.KIND_SYSTEM,
+                    WorkflowProgress.KIND_SYSTEM,
                     waitedMs,
                     capacityAcquiredSummary(providerId, permit, waitedMs)
             );
             return loadWithCircuitBreaker(providerId, () -> loadWithRetries(providerId, cacheName, key, loader));
         } catch (ProviderCapacityTimeoutException ex) {
-            progressPublisher.failed(
+            workflowProgress.failed(
                     stepId,
                     label,
-                    ChatProgressPublisher.KIND_SYSTEM,
+                    WorkflowProgress.KIND_SYSTEM,
                     elapsedDurationMs(startedAt),
                     "Timed out waiting for " + providerLabel(providerId) + " capacity."
             );
@@ -289,10 +289,10 @@ public class ExternalDataCache {
                 if (attempt >= maxAttempts) {
                     throw new ProviderRetriesExhaustedException(providerId, attempt, ex);
                 }
-                progressPublisher.running(
+                workflowProgress.running(
                         retryStepId(providerId),
                         "Retrying " + providerLabel(providerId),
-                        ChatProgressPublisher.KIND_SYSTEM,
+                        WorkflowProgress.KIND_SYSTEM,
                         "Attempt " + attempt + " failed. Retrying " + providerLabel(providerId) + "."
                 );
                 sleepBeforeRetry();
@@ -336,10 +336,10 @@ public class ExternalDataCache {
 
     private void recordCacheHitProgress(String cacheName, String key, long startedAt) {
         String id = dataAccessStepId(cacheName, key, ExternalDataAccess.SOURCE_CACHE);
-        progressPublisher.completed(
+        workflowProgress.completed(
                 id,
                 "Reading cached data",
-                ChatProgressPublisher.KIND_SYSTEM,
+                WorkflowProgress.KIND_SYSTEM,
                 elapsedDurationMs(startedAt),
                 "Read " + dataProgressName(cacheName, key) + " from Redis."
         );

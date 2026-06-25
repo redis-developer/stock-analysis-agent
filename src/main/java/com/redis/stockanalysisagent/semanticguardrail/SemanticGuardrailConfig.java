@@ -1,6 +1,6 @@
 package com.redis.stockanalysisagent.semanticguardrail;
 
-import com.redis.stockanalysisagent.chat.ChatProgressPublisher;
+import com.redis.stockanalysisagent.chat.WorkflowProgress;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -10,8 +10,8 @@ public class SemanticGuardrailConfig {
     @Bean
     public SemanticGuardrailAdvisor semanticGuardrailAdvisor(
             SemanticGuardrailService semanticGuardrailService,
-            ChatProgressPublisher progressPublisher
+            WorkflowProgress workflowProgress
     ) {
-        return new SemanticGuardrailAdvisor(semanticGuardrailService, progressPublisher);
+        return new SemanticGuardrailAdvisor(semanticGuardrailService, workflowProgress);
     }
 }

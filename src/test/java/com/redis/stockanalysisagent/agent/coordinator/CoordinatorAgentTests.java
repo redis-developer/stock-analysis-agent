@@ -2,7 +2,7 @@ package com.redis.stockanalysisagent.agent.coordinator;
 
 import com.redis.stockanalysisagent.agent.AgentExecution;
 import com.redis.stockanalysisagent.agent.AgentType;
-import com.redis.stockanalysisagent.chat.ChatProgressPublisher;
+import com.redis.stockanalysisagent.chat.WorkflowProgress;
 import com.redis.stockanalysisagent.semanticcache.SemanticAnalysisCache;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.ResponseEntity;
@@ -118,7 +118,7 @@ class CoordinatorAgentTests {
                 chatClient,
                 coordinatorAgentTools,
                 semanticAnalysisCache,
-                mock(ChatProgressPublisher.class)
+                mock(WorkflowProgress.class)
         );
     }
 }

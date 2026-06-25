@@ -1,6 +1,6 @@
 package com.redis.stockanalysisagent.agent.coordinator;
 
-import com.redis.stockanalysisagent.chat.ChatProgressPublisher;
+import com.redis.stockanalysisagent.chat.WorkflowProgress;
 import com.redis.stockanalysisagent.memory.LongTermMemoryAdvisor;
 import com.redis.stockanalysisagent.instrumentation.ToolCallInstrumentation;
 import com.redis.stockanalysisagent.semanticcache.SemanticCacheAdvisor;
@@ -124,8 +124,8 @@ public class CoordinatorAgentConfig {
                 .defaultAdvisors(longTermMemoryAdvisor)
                 .defaultAdvisors(AdvisorParams.ENABLE_NATIVE_STRUCTURED_OUTPUT)
                 .defaultTools(toolCallInstrumentation.callbacks(
-                        ChatProgressPublisher.ACTOR_TYPE_COORDINATOR,
-                        ChatProgressPublisher.ACTOR_COORDINATOR,
+                        WorkflowProgress.ACTOR_TYPE_COORDINATOR,
+                        WorkflowProgress.ACTOR_COORDINATOR,
                         coordinatorAgentTools
                 ))
                 .defaultSystem(DEFAULT_PROMPT)

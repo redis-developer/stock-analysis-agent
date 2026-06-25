@@ -2,7 +2,7 @@ package com.redis.stockanalysisagent.chat;
 
 import com.redis.stockanalysisagent.agent.TokenUsageSummary;
 import com.redis.stockanalysisagent.cache.ExternalApiUsageSnapshot;
-import com.redis.stockanalysisagent.workflow.ToolApproval;
+import com.redis.stockanalysisagent.workflow.approval.ToolApproval;
 import com.redis.stockanalysisagent.workflow.WorkflowStatus;
 
 import java.util.List;

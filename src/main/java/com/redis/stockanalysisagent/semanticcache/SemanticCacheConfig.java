@@ -1,6 +1,6 @@
 package com.redis.stockanalysisagent.semanticcache;
 
-import com.redis.stockanalysisagent.chat.ChatProgressPublisher;
+import com.redis.stockanalysisagent.chat.WorkflowProgress;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -10,9 +10,9 @@ public class SemanticCacheConfig {
     @Bean
     public SemanticCacheAdvisor semanticCacheAdvisor(
             SemanticAnalysisCache semanticAnalysisCache,
-            ChatProgressPublisher progressPublisher
+            WorkflowProgress workflowProgress
     ) {
-        return new SemanticCacheAdvisor(semanticAnalysisCache, progressPublisher);
+        return new SemanticCacheAdvisor(semanticAnalysisCache, workflowProgress);
     }
 
     @Bean

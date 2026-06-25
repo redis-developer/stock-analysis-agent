@@ -5,6 +5,7 @@ import com.redis.stockanalysisagent.memory.AmsChatMemoryRepository;
 import com.redis.stockanalysisagent.memory.AmsChatMemoryRepository.StoredMemoryMessage;
 import com.redis.stockanalysisagent.session.dto.ChatSessionMetadata;
 import com.redis.stockanalysisagent.session.dto.ChatSessionMessage;
+import com.redis.stockanalysisagent.workflow.events.WorkflowEventService;
 import com.redis.stockanalysisagent.workflow.WorkflowMetadata;
 import com.redis.stockanalysisagent.workflow.WorkflowService;
 import com.redis.stockanalysisagent.workflow.WorkflowStatus;
@@ -209,7 +210,15 @@ class ChatSessionServiceTests {
     @Test
     void sessionMetadataIncludesLatestWorkflowState() {
         WorkflowService workflowService = mock(WorkflowService.class);
-        ChatSessionService service = new ChatSessionService(chatMemory, memoryRepository, workflowService);
+        WorkflowEventService workflowEventService = mock(WorkflowEventService.class);
+        ChatSessionService service = new ChatSessionService(
+                chatMemory,
+                memoryRepository,
+                workflowService,
+                new WorkflowStepProjector(workflowEventService),
+                null,
+                null
+        );
         WorkflowMetadata workflow = new WorkflowMetadata(
                 "workflow-2",
                 null,
@@ -219,9 +228,6 @@ class ChatSessionServiceTests {
                 WorkflowStatus.RECOVERING,
                 "workflow-1",
                 2,
-                "owner-1",
-                null,
-                1L,
                 1,
                 null,
                 null,
@@ -236,7 +242,7 @@ class ChatSessionServiceTests {
                 WorkflowService.REPLAYED_FROM_WORKFLOW_ID, "workflow-1",
                 WorkflowService.REPLAY_CHECKPOINT_ID, "COORDINATOR:coordinator:1782048311457"
         ));
-        when(workflowService.workflowEvents("workflow-1", 200)).thenReturn(List.of(
+        when(workflowEventService.events("workflow-1", 200)).thenReturn(List.of(
                 Map.of(
                         "stepId", "SEMANTIC_CACHE",
                         "kind", "system",
@@ -254,7 +260,7 @@ class ChatSessionServiceTests {
                         "summary", "Completed after 1 specialist agent call."
                 )
         ));
-        when(workflowService.workflowEvents("workflow-2", 200)).thenReturn(List.of(
+        when(workflowEventService.events("workflow-2", 200)).thenReturn(List.of(
                 Map.of(
                         "stepId", "WORKFLOW_RECOVERY",
                         "kind", "system",
@@ -299,7 +305,15 @@ class ChatSessionServiceTests {
     @Test
     void sessionMetadataMarksRecoveredStepsWhileOriginalWorkflowIsRecovering() {
         WorkflowService workflowService = mock(WorkflowService.class);
-        ChatSessionService service = new ChatSessionService(chatMemory, memoryRepository, workflowService);
+        WorkflowEventService workflowEventService = mock(WorkflowEventService.class);
+        ChatSessionService service = new ChatSessionService(
+                chatMemory,
+                memoryRepository,
+                workflowService,
+                new WorkflowStepProjector(workflowEventService),
+                null,
+                null
+        );
         WorkflowMetadata workflow = new WorkflowMetadata(
                 "workflow-1",
                 null,
@@ -309,9 +323,6 @@ class ChatSessionServiceTests {
                 WorkflowStatus.RECOVERING,
                 null,
                 1,
-                "owner-1",
-                null,
-                2L,
                 2,
                 null,
                 null,
@@ -322,7 +333,7 @@ class ChatSessionServiceTests {
         when(workflowService.sessionWorkflowIds("session-1")).thenReturn(List.of("workflow-1"));
         when(workflowService.readWorkflow("workflow-1")).thenReturn(workflow);
         when(workflowService.workflowFields("workflow-1")).thenReturn(Map.of());
-        when(workflowService.workflowEvents("workflow-1", 200)).thenReturn(List.of(
+        when(workflowEventService.events("workflow-1", 200)).thenReturn(List.of(
                 Map.of(
                         "stepId", "MEMORY_RETRIEVAL",
                         "kind", "system",

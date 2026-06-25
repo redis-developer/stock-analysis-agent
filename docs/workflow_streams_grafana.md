@@ -6,20 +6,18 @@ Each chat request creates:
 
 ```text
 stock-analysis:workflows:{workflowId}
+stock-analysis:workflows:{workflowId}:lease
 stock-analysis:workflows:{workflowId}:events
 stock-analysis:workflows:{workflowId}:checkpoints
-stock-analysis:workflows:running
-stock-analysis:workflow-execution-locks:{operation}:{workflowId}:{checkpointId}
-stock-analysis:workflow-idempotency:{operation}:{workflowId}:{checkpointId}
+stock-analysis:workflow-recovery
 stock-analysis:users:{userId}:workflows
 stock-analysis:users:{userId}:conversations
 stock-analysis:conversations:{conversationId}:workflows
 ```
 
-The hash stores workflow metadata, including status, owner id, lease expiry, lease version, attempt, replay origin, and recovery target.
-The running sorted set indexes active workflows by lease expiry so another replica can find stale work after a crash.
-The execution lock keys prevent two replicas from replaying the same checkpoint at the same time.
-The idempotency keys store the completed replay or recovery workflow for a checkpoint so duplicate work can return the existing workflow.
+The hash stores workflow metadata, including status, attempt, replay origin, recovery target, session, conversation, and timestamps.
+The lease key is a short TTL key. Its value is the active worker id. Redis expires it when the worker stops renewing it.
+The recovery stream stores workflow ids that may need to be checked after a crash or handoff.
 The event stream stores the ordered agent events, including tool requests, tool results, summaries, actor names, checkpoint markers, and timing.
 The checkpoint stream stores completed replayable steps, starting with completed agent steps and completed tool calls.
 The user and conversation lists let Grafana filter workflow ids by user, then conversation, before reading the selected workflow hash and stream.
@@ -79,6 +77,7 @@ The dashboard is provisioned from:
 
 ```text
 infra/grafana/dashboards/redis-workflow-streams.json
+infra/grafana/dashboards/redis-workflow-states.json
 infra/grafana/dashboards/redis-provider-dead-letter.json
 ```
 
@@ -93,9 +92,7 @@ XLEN stock-analysis:workflows:{workflowId}:events
 HGETALL stock-analysis:workflows:{workflowId}
 XRANGE stock-analysis:workflows:{workflowId}:events - +
 XREVRANGE stock-analysis:workflows:{workflowId}:checkpoints + - COUNT 1
-ZRANGEBYSCORE stock-analysis:workflows:running -inf {now}
-SET stock-analysis:workflow-execution-locks:{operation}:{workflowId}:{checkpointId} {workerToken} NX PX {ttl}
-HGETALL stock-analysis:workflow-idempotency:{operation}:{workflowId}:{checkpointId}
+XRANGE stock-analysis:workflow-recovery - +
 XLEN stock-analysis:provider-dead-letter
 XREVRANGE stock-analysis:provider-dead-letter + - COUNT 100
 ```
@@ -105,19 +102,27 @@ The workflow event sequence panel embeds the Spring app endpoint at `/api/workfl
 Workflow events store payloads for the original request, memory retrieval, coordinator output, specialist agent output, tool calls, and saved turns. This makes the stream useful for reconstructing what the agent saw, not only what step was running.
 
 The workflow metadata panel embeds `/api/workflows/{workflowId}/metadata`. That endpoint reads the Redis hash and renders status, turn, session, previous workflow, timestamps, and duration as compact fields.
-It also renders the owner id, lease expiry, lease version, attempt, replay origin, and recovery target.
+It also renders attempt, replay origin, and recovery target.
 
 The checkpoint replay panel embeds `/api/workflows/{workflowId}/replay-context`. That view reads the latest checkpoint, workflow metadata, session workflow list, and events recorded after the checkpoint.
 
-The replay button calls `POST /api/workflows/{workflowId}/replay`. The app creates a new workflow in the same session and conversation, sends the latest checkpoint back through the normal chat execution path, and writes `replayedFromWorkflowId` and `replayCheckpointId` to the new workflow hash. The original workflow is not mutated. The chat turn is saved under the original user message, so the internal replay prompt is not shown in the chat UI.
+The replay button calls `POST /api/workflows/{workflowId}/replay`. The app claims the original workflow lease, creates a new workflow in the same session and conversation, sends the latest checkpoint back through the normal chat execution path, and writes `replayedFromWorkflowId` and `replayCheckpointId` to the new workflow hash. When replay finishes, the original workflow is marked `RECOVERED` with `recoveredByWorkflowId`. The chat turn is saved under the original user message, so the internal replay prompt is not shown in the chat UI.
 
 The provider dead letter dashboard reads `stock-analysis:provider-dead-letter`. Each stream entry includes `workflowId`, `stepId`, `providerId`, `cacheName`, `cacheKey`, `attempts`, `reason`, and `failedAt`.
 
 ## Crash Recovery
 
-Each running workflow has a short lease. The active application instance renews the lease while the chat request is executing.
+Each running workflow has a short lease key:
 
-On startup and on a timer, each replica scans `stock-analysis:workflows:running` for expired leases. It then runs an atomic Redis script against the workflow hash. The script only claims the workflow when the status is `RUNNING` or `RECOVERING` and the stored lease has expired. Claiming increments `leaseVersion`, increments `attempt`, sets the current replica as `ownerId`, and extends the lease.
+```text
+stock-analysis:workflows:{workflowId}:lease
+```
+
+The active application instance renews that key while the chat request is executing.
+
+On startup and on a timer, each replica reads `stock-analysis:workflow-recovery`. It loads each workflow hash. Terminal workflows are acknowledged. Running workflows are only claimed when `SET stock-analysis:workflows:{workflowId}:lease {workerId} NX PX {ttl}` succeeds. If another replica still owns the lease, the workflow is left for a later scan.
+
+Claiming a workflow changes its hash status to `RECOVERING` and increments `attempt`.
 
 The recovery worker reads the latest checkpoint and replays from it into a new workflow. The original workflow is marked `RECOVERED` with `recoveredByWorkflowId`. If no checkpoint exists, the original workflow is marked `FAILED`.
 
@@ -125,15 +130,16 @@ Automatic recovery saves the recovered assistant answer under the original user 
 
 ## Distributed Worker Safety
 
-Manual replay and automatic recovery use the same idempotency shape:
+Manual replay and automatic recovery use the original workflow hash as the replay record.
 
 ```text
-replay:{workflowId}:{checkpointId}
-recovery:{workflowId}:{checkpointId}
+stock-analysis:workflows:{workflowId}
+status=RECOVERED
+recoveredByWorkflowId={newWorkflowId}
 ```
 
-Before replaying, the app checks the idempotency hash. If a completed replay already exists, it returns that workflow id instead of running the agent again.
+Before replaying, the app checks `recoveredByWorkflowId`. If a recovered workflow already exists, it returns that workflow id instead of running the agent again.
 
-If no completed record exists, the worker acquires a Redis lock with `SET NX` and a bounded TTL. Only the lock holder executes the replay. When the replay completes, it writes the idempotency hash with the resulting workflow id, conversation id, status, and completion time.
+If no recovered workflow exists, the worker acquires the workflow lease key with `SET NX PX`. Only the lease holder executes the replay. When replay completes, the original workflow hash stores the recovered workflow id.
 
 Workflow data expires after 24 hours.
