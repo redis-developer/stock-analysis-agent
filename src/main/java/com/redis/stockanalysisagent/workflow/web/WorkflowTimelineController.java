@@ -2,6 +2,7 @@ package com.redis.stockanalysisagent.workflow.web;
 
 import com.redis.stockanalysisagent.workflow.WorkflowService;
 import com.redis.stockanalysisagent.workflow.events.WorkflowEventService;
+import org.springframework.dao.DataAccessException;
 import org.springframework.data.domain.Range;
 import org.springframework.data.redis.connection.DataType;
 import org.springframework.data.redis.connection.stream.MapRecord;
@@ -38,24 +39,68 @@ public class WorkflowTimelineController {
             @RequestParam(required = false) String userId,
             @RequestParam(required = false) String conversationId
     ) {
+        List<WorkflowState> states;
+        try {
+            states = workflowStates(userId, conversationId);
+        } catch (DataAccessException ex) {
+            return ResponseEntity.ok()
+                    .contentType(MediaType.TEXT_HTML)
+                    .body(renderError("Workflow states unavailable", ex.getMostSpecificCause().getMessage()));
+        }
         return ResponseEntity.ok()
                 .contentType(MediaType.TEXT_HTML)
-                .body(renderStates(workflowStates(userId, conversationId), clean(userId), clean(conversationId)));
+                .body(renderStates(states, clean(userId), clean(conversationId)));
+    }
+
+    @GetMapping(value = "/approvals", produces = MediaType.TEXT_HTML_VALUE)
+    public ResponseEntity<String> approvals(
+            @RequestParam(required = false) String userId,
+            @RequestParam(required = false) String conversationId
+    ) {
+        List<WorkflowState> approvals;
+        try {
+            approvals = workflowStates(userId, conversationId).stream()
+                    .filter(state -> "WAITING_FOR_APPROVAL".equals(value(state.fields(), "status")))
+                    .toList();
+        } catch (DataAccessException ex) {
+            return ResponseEntity.ok()
+                    .contentType(MediaType.TEXT_HTML)
+                    .body(renderError("Workflow approvals unavailable", ex.getMostSpecificCause().getMessage()));
+        }
+        return ResponseEntity.ok()
+                .contentType(MediaType.TEXT_HTML)
+                .body(renderApprovals(approvals, clean(userId), clean(conversationId)));
     }
 
     @GetMapping(value = "/{workflowId}/timeline", produces = MediaType.TEXT_HTML_VALUE)
     public ResponseEntity<String> timeline(@PathVariable String workflowId) {
+        List<TimelineEvent> events;
+        try {
+            events = events(clean(workflowId));
+        } catch (DataAccessException ex) {
+            return ResponseEntity.ok()
+                    .contentType(MediaType.TEXT_HTML)
+                    .body(renderTimelineError(workflowId, "Workflow event stream unavailable", ex.getMostSpecificCause().getMessage()));
+        }
         return ResponseEntity.ok()
                 .contentType(MediaType.TEXT_HTML)
-                .body(render(workflowId, events(workflowId)));
+                .body(render(clean(workflowId), events));
     }
 
     @GetMapping(value = "/{workflowId}/metadata", produces = MediaType.TEXT_HTML_VALUE)
     public ResponseEntity<String> metadata(@PathVariable String workflowId) {
-        Map<Object, Object> metadata = redisTemplate.opsForHash().entries(WorkflowService.workflowKey(workflowId));
+        String id = clean(workflowId);
+        Map<Object, Object> metadata;
+        try {
+            metadata = workflowMetadata(id);
+        } catch (DataAccessException ex) {
+            return ResponseEntity.ok()
+                    .contentType(MediaType.TEXT_HTML)
+                    .body(renderError("Workflow metadata unavailable", ex.getMostSpecificCause().getMessage()));
+        }
         return ResponseEntity.ok()
                 .contentType(MediaType.TEXT_HTML)
-                .body(renderMetadata(workflowId, metadata));
+                .body(renderMetadata(id, metadata));
     }
 
     private List<TimelineEvent> events(String workflowId) {
@@ -67,6 +112,27 @@ public class WorkflowTimelineController {
         return records.stream()
                 .map(this::event)
                 .toList();
+    }
+
+    private Map<Object, Object> workflowMetadata(String workflowId) {
+        if (workflowId.isBlank()) {
+            return Map.of();
+        }
+
+        String key = WorkflowService.workflowKey(workflowId);
+        DataType type = redisTemplate.type(key);
+        if (type == null || type == DataType.NONE) {
+            return Map.of();
+        }
+        if (type != DataType.HASH) {
+            return Map.of(
+                    "workflowId", workflowId,
+                    "status", "UNAVAILABLE",
+                    "failureReason", "Expected Redis hash at " + key + " but found " + type.code() + "."
+            );
+        }
+        Map<Object, Object> metadata = redisTemplate.opsForHash().entries(key);
+        return metadata == null ? Map.of() : metadata;
     }
 
     private TimelineEvent event(MapRecord<String, Object, Object> record) {
@@ -248,6 +314,16 @@ public class WorkflowTimelineController {
         return html.toString();
     }
 
+    private String renderTimelineError(String workflowId, String title, String message) {
+        return document("""
+                <div class="metadata-empty">
+                  <strong>%s</strong>
+                  <div>Workflow %s</div>
+                  <div>%s</div>
+                </div>
+                """.formatted(escape(title), escape(clean(workflowId)), escape(message)));
+    }
+
     private List<WorkflowState> workflowStates(String userId, String conversationId) {
         List<String> ids = workflowIds(userId, conversationId);
         if (ids.isEmpty()) {
@@ -367,6 +443,68 @@ public class WorkflowTimelineController {
                     .append(escape(value(fields, "updatedAt")))
                     .append("</td><td class=\"mono\">")
                     .append(escape(value(fields, WorkflowService.RECOVERED_BY_WORKFLOW_ID)))
+                    .append("</td></tr>");
+        }
+        html.append("</tbody></table></div>");
+        return document(html.toString());
+    }
+
+    private String renderApprovals(List<WorkflowState> states, String userId, String conversationId) {
+        StringBuilder html = new StringBuilder();
+        html.append("<div class=\"states\"><div class=\"states-header\"><div><div class=\"states-title\">Pending human approvals</div><div class=\"states-subtitle\">");
+        if (!conversationId.isBlank()) {
+            html.append("Conversation ").append(escape(conversationId));
+        } else if (!userId.isBlank()) {
+            html.append("User ").append(escape(userId));
+        } else {
+            html.append("All workflow hashes");
+        }
+        html.append("</div></div><div class=\"states-count\">")
+                .append(states.size())
+                .append("</div></div>");
+
+        if (states.isEmpty()) {
+            html.append("<div class=\"metadata-empty\">No workflows are waiting for human approval.</div></div>");
+            return document(html.toString());
+        }
+
+        html.append("""
+                <table class="states-table">
+                <thead>
+                <tr>
+                  <th>workflowId</th>
+                  <th>tool</th>
+                  <th>ticker</th>
+                  <th>approval</th>
+                  <th>agent</th>
+                  <th>userId</th>
+                  <th>conversationId</th>
+                  <th>updatedAt</th>
+                </tr>
+                </thead>
+                <tbody>
+                """);
+        for (WorkflowState state : states) {
+            Map<Object, Object> fields = state.fields();
+            String workflowId = state.workflowId();
+            html.append("<tr><td class=\"mono\"><button class=\"workflow-link\" type=\"button\" data-workflow-id=\"")
+                    .append(escape(workflowId))
+                    .append("\" onclick=\"openWorkflow(this.dataset.workflowId)\">")
+                    .append(escape(workflowId))
+                    .append("</button></td><td>")
+                    .append(escape(value(fields, "approvalToolName")))
+                    .append("</td><td>")
+                    .append(escape(value(fields, "approvalTicker")))
+                    .append("</td><td><span class=\"metadata-status waiting_for_approval\">")
+                    .append(escape(value(fields, "approvalStatus")))
+                    .append("</span></td><td>")
+                    .append(escape(value(fields, "approvalAgentType")))
+                    .append("</td><td>")
+                    .append(escape(value(fields, "userId")))
+                    .append("</td><td class=\"mono\">")
+                    .append(escape(value(fields, "conversationId")))
+                    .append("</td><td class=\"mono\">")
+                    .append(escape(value(fields, "updatedAt")))
                     .append("</td></tr>");
         }
         html.append("</tbody></table></div>");
@@ -537,6 +675,18 @@ public class WorkflowTimelineController {
                   color: #d7dce5;
                   overflow-wrap: anywhere;
                 }
+                .workflow-link {
+                  appearance: none;
+                  border: 0;
+                  padding: 0;
+                  background: transparent;
+                  color: #9cc9ff;
+                  cursor: pointer;
+                  font: inherit;
+                  text-align: left;
+                  text-decoration: underline;
+                  overflow-wrap: anywhere;
+                }
                 .mono {
                   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
                   font-size: 11px;
@@ -571,12 +721,26 @@ public class WorkflowTimelineController {
                   .metadata-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
                 }
                 </style>
+                <script>
+                function openWorkflow(workflowId) {
+                  window.top.location.href = "/d/stock-analysis-workflows/workflow-event-log?var-workflow_id=" + encodeURIComponent(workflowId);
+                }
+                </script>
                 </head>
                 <body>
-                %s
+                __BODY__
                 </body>
                 </html>
-                """.formatted(body);
+                """.replace("__BODY__", body);
+    }
+
+    private String renderError(String title, String message) {
+        return document("""
+                <div class="metadata-empty">
+                  <strong>%s</strong>
+                  <div>%s</div>
+                </div>
+                """.formatted(escape(title), escape(message)));
     }
 
     private String metric(String value) {
@@ -666,7 +830,11 @@ public class WorkflowTimelineController {
     private Instant timestamp(Map<Object, Object> values, Long fallbackTimestamp) {
         String timestamp = value(values, "timestamp");
         if (!timestamp.isBlank()) {
-            return Instant.parse(timestamp);
+            try {
+                return Instant.parse(timestamp);
+            } catch (RuntimeException ignored) {
+                // Older demo events may not have stored ISO timestamps.
+            }
         }
         long epochMillis = fallbackTimestamp == null ? 0 : fallbackTimestamp;
         return Instant.ofEpochMilli(epochMillis);
@@ -690,7 +858,7 @@ public class WorkflowTimelineController {
     }
 
     private String clean(String value) {
-        if (value == null || value.isBlank() || value.contains("empty array")) {
+        if (value == null || value.isBlank() || value.contains("empty array") || value.contains("${")) {
             return "";
         }
         return value.trim();

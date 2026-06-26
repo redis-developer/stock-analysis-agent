@@ -14,6 +14,18 @@
       "keepTime": true,
       "tags": [],
       "targetBlank": false,
+      "title": "Workflow States",
+      "tooltip": "Open the workflow state dashboard",
+      "type": "link",
+      "url": "/d/stock-analysis-workflow-states/workflow-states"
+    },
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
       "title": "Workflow Event Log",
       "tooltip": "Open the detailed workflow dashboard",
       "type": "link",
@@ -38,11 +50,11 @@
       },
       "id": 1,
       "options": {
-        "content": "This dashboard lists current workflow hash state from `stock-analysis:workflows:{workflowId}`. Use the filters to scope by user or conversation.",
+        "content": "This dashboard lists workflow hashes currently waiting for human approval. It reads `stock-analysis:workflows:{workflowId}` and shows rows where `status` is `WAITING_FOR_APPROVAL`.",
         "mode": "markdown"
       },
       "pluginVersion": "11.0.0",
-      "title": "Workflow state",
+      "title": "Human approval queue",
       "type": "text"
     },
     {
@@ -55,18 +67,18 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 20,
+        "h": 18,
         "w": 24,
         "x": 0,
         "y": 4
       },
       "id": 2,
       "options": {
-        "content": "<iframe title=\"Workflow states\" src=\"@@STOCK_ANALYSIS_AGENT_APP_BASE_URL@@/api/workflows/states?userId=${user_id}&conversationId=${conversation_id}\" style=\"width:100%;height:100%;border:0;background:#111217;\"></iframe>",
+        "content": "<iframe title=\"Workflow approvals\" src=\"@@STOCK_ANALYSIS_AGENT_APP_BASE_URL@@/api/workflows/approvals?userId=${user_id}&conversationId=${conversation_id}\" style=\"width:100%;height:100%;border:0;background:#111217;\"></iframe>",
         "mode": "html"
       },
       "pluginVersion": "11.0.0",
-      "title": "Workflow hashes",
+      "title": "Workflows waiting for approval",
       "type": "text"
     }
   ],
@@ -76,7 +88,7 @@
     "redis",
     "agents",
     "workflow",
-    "state"
+    "approval"
   ],
   "templating": {
     "list": [
@@ -128,8 +140,8 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "Workflow States",
-  "uid": "stock-analysis-workflow-states",
+  "title": "Workflow Approvals",
+  "uid": "stock-analysis-workflow-approvals",
   "version": 1,
   "weekStart": ""
 }

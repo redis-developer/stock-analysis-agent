@@ -425,7 +425,7 @@ public class WorkflowReplayController {
                 .append("result.innerHTML='Created replay workflow <a href=\"'+escapeAttribute(href)+'\" target=\"_top\"><code>'+escapeHtml(replayWorkflowId)+'</code></a>.';")
                 .append("}catch(error){result.textContent=error.message||'Replay failed.';button.disabled=false;}")
                 .append("});}")
-                .append("function workflowDashboardUrl(id){const path='/d/stock-analysis-workflows/workflow-event-log?var-workflow_id='+encodeURIComponent(id)+'&refresh=5s';")
+                .append("function workflowDashboardUrl(id){const path='/d/stock-analysis-workflows/workflow-event-log?var-workflow_id='+encodeURIComponent(id);")
                 .append("try{if(document.referrer){return new URL(path,new URL(document.referrer).origin).toString();}}catch(error){}")
                 .append("return path;}")
                 .append("function escapeHtml(value){return String(value||'').replace(/[&<>\"']/g,(char)=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[char]));}")
